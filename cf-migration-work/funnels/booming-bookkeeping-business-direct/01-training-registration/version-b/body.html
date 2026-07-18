@@ -1,0 +1,128 @@
+<!--
+Body scripts for Booming Bookkeeping Business - Direct / Step 1: Training Registration / Version B.
+Paste scripts that belong in the page body/footer below this comment.
+-->
+<script type="text/javascript">
+    (function(e,t,o,n,p,r,i){e.visitorGlobalObjectAlias=n;e[e.visitorGlobalObjectAlias]=e[e.visitorGlobalObjectAlias]||function(){(e[e.visitorGlobalObjectAlias].q=e[e.visitorGlobalObjectAlias].q||[]).push(arguments)};e[e.visitorGlobalObjectAlias].l=(new Date).getTime();r=t.createElement("script");r.src=o;r.async=true;i=t.getElementsByTagName("script")[0];i.parentNode.insertBefore(r,i)})(window,document,"https://diffuser-cdn.app-us1.com/diffuser/diffuser.js","vgo");
+    vgo('setAccount', '252390389');
+    vgo('setTrackByDefault', true);
+
+    vgo('process');
+</script>
+
+<script type="text/javascript">
+$(function () {
+const IPinfoToken = 'f6106ad2dcab3d';
+
+const itiIstances = [];
+let validate;
+// Add Zapier hidden input filed
+$('#cfAR').append('<input type="hidden" id="intl-phone">');
+const zapierPhoneData = $('#intl-phone');
+
+// The phoneNumberInput automatically finds the form "submit" button
+const submitButton = $('a[href="#submit-form"]');
+
+// The phoneNumberInput automatically finds the phone input filed
+const phoneNumberInputs = $("input[name='phone']");
+
+//Add the validation message after the phoneNumberInput
+phoneNumberInputs.after('<div class="phone-status hide"></div>');
+const phoneStatus = $('.phone-status');
+
+phoneNumberInputs.each(function () {
+// const phoneNumberInput =⁄ phoneNumberInputs.eq(el);
+const phoneNumberInput = $(this);
+
+// Initialize intlTelInput
+const iti = window.intlTelInput(phoneNumberInput[0], {
+initialCountry: 'auto',
+nationalMode: false, // da lasciare
+utilsScript:
+'https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.8/js/utils.js?1603274336113',
+geoIpLookup: function (success, failure) {
+$.get(
+IPinfoToken
+? 'https://ipinfo.io?token=' + IPinfoToken
+: 'https://ipinfo.io',
+function () {},
+'jsonp'
+).always(function (resp) {
+var countryCode = resp && resp.country ? resp.country : 'us';
+success(countryCode);
+});
+},
+});
+
+itiIstances.push(iti);
+
+function validatePhone() {
+// intlTelInput validation error
+const errorMap = [
+'Invalid number',
+'Invalid country code',
+'Too short',
+'Too long',
+'Invalid number',
+];
+
+resetPhoneState();
+if (phoneNumberInput.val().trim()) {
+if (iti.isValidNumber()) {
+phoneNumberInputs
+.removeClass('invalid-phone')
+.addClass('valid-phone');
+
+phoneStatus.html('✓ Valid').removeClass('hide');
+
+submitButton.removeClass('disabled-button');
+zapierPhoneData.val(iti.getNumber());
+} else {
+phoneNumberInputs
+.removeClass('valid-phone')
+.addClass('invalid-phone');
+
+phoneStatus
+.removeClass('hide')
+.html(errorMap[iti.getValidationError()]);
+
+submitButton.addClass('disabled-button');
+}
+}
+}
+
+validate = validatePhone;
+
+// Validate the phone number on keyup and change
+phoneNumberInput.on('keyup change', validatePhone);
+
+phoneNumberInput.on('countrychange', function () {
+itiIstances.forEach(function (el) {
+const iso = iti.getSelectedCountryData().iso2;
+if (iso) {
+el.setCountry(iso);
+validatePhone();
+}
+});
+});
+
+// Reset the phone state messages and sets the phone number with intlTelInput
+let firstLoad = true;
+function resetPhoneState() {
+phoneNumberInputs.removeClass('error');
+$('.phone-status').addClass('hide').html('');
+if (firstLoad === true) {
+iti.setNumber($('#cf_contact_phone').val());
+firstLoad = false;
+} else {
+iti.setNumber(iti.getNumber());
+}
+}
+resetPhoneState();
+});
+
+itiIstances[0].promise.then(function () {
+validate();
+});
+});
+</script>

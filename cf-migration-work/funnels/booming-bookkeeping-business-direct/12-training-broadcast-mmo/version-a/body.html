@@ -1,0 +1,178 @@
+<!--
+Body scripts for Booming Bookkeeping Business - Direct / Step 12: Training Broadcast - MMO / Version A.
+Paste scripts that belong in the page body/footer below this comment.
+-->
+<script>function extractPageId(){for(var e=[],t=location.search.substr(1).split("&"),a=0;a<t.length;a++)"page_id"===(e=t[a].split("="))[0]&&(pageId=decodeURIComponent(e[1]));return pageId}var pageid=document.getElementById("page-id").value?document.getElementById("page-id").value:extractPageId(),PowerScripts=document.createElement("script"),PageHead=document.getElementsByTagName("head"),url=PageHead[0].hasAttribute("data-this-url")?new URL(PageHead[0].getAttribute("data-this-url")):new URL(document.URL);PowerScripts.src="https://ps.boaa.it/powerscripts.js?url="+url.hostname+"&pageid="+pageid,document.getElementsByTagName("body")[0].appendChild(PowerScripts);</script><script>
+    (function(e,t,o,n,p,r,i){e.visitorGlobalObjectAlias=n;e[e.visitorGlobalObjectAlias]=e[e.visitorGlobalObjectAlias]||function(){(e[e.visitorGlobalObjectAlias].q=e[e.visitorGlobalObjectAlias].q||[]).push(arguments)};e[e.visitorGlobalObjectAlias].l=(new Date).getTime();r=t.createElement("script");r.src=o;r.async=true;i=t.getElementsByTagName("script")[0];i.parentNode.insertBefore(r,i)})(window,document,"https://diffuser-cdn.app-us1.com/diffuser/diffuser.js","vgo");
+    vgo('setAccount', '252390389');
+    vgo('setTrackByDefault', true);
+
+    vgo('process');
+</script>
+
+<script>
+$(document).ready(function() {
+  $(document).find('[data-title="faq-accord-question"] > h1').css({ 'cursor': 'pointer' })
+    var accordQuest = $(document).find(
+        '[data-title="faq-accord-question"] > h1'
+    );
+    var accordAns = $(document).find('[data-title="faq-accord-answer"]');
+    var fontColorBase = accordQuest.css('color');
+
+    accordQuest.each(function() {
+        $(this).css({ 'text-align': 'left', padding: '15px' });
+        $(this).after(
+            '<i style="cursor:pointer;color:' +
+                fontColorBase +
+                ';position: absolute;top: 50%;-webkit-transform: translateY(-50%);-ms-transform: translateY(-50%);transform: translateY(-50%); left: -5px; color: #e62029; }" class="fa_prepended fa fa-plus" contenteditable="false"></i>'
+        );
+        $(this).click(function() {
+            if ($(this).parent().find('i').hasClass('fas fa-times')) {
+                $(this).parent().find('i').removeClass('fas fa-times').addClass('fa-plus');
+            } else {
+                $(this).parent().find('i').removeClass('fa-plus').addClass('fas fa-times');
+            }
+            $(this)
+                .parent()
+                .nextUntil('[data-title="faq-accord-question"]')
+                .slideToggle();
+        });
+    });
+    var accordBut = $(document).find('[data-title="faq-accord-question"] > i');
+    accordBut.each(function() {
+        $(this).click(function() {
+            if ($(this).hasClass('fa-minus')) {
+                $(this).removeClass('fa-minus').addClass('fa-plus');
+            } else {
+                $(this).removeClass('fa-plus').addClass('fa-minus');
+            }
+            $(this)
+                .parent()
+                .nextUntil('[data-title="faq-accord-question"]')
+                .slideToggle();
+    });
+    });
+    accordAns.each(function() {
+        $(this).css({ 'text-align': 'left', padding: '15px' });
+    });
+  accordAns.slideUp();
+  // accordBut.eq(0).click()
+});
+</script>
+
+<script type="text/javascript">
+$(function () {
+const IPinfoToken = 'f6106ad2dcab3d';
+
+const itiIstances = [];
+let validate;
+// Add Zapier hidden input filed
+$('#cfAR').append('<input type="hidden" id="intl-phone">');
+const zapierPhoneData = $('#intl-phone');
+
+// The phoneNumberInput automatically finds the form "submit" button
+const submitButton = $('a[href="#submit-form"]');
+
+// The phoneNumberInput automatically finds the phone input filed
+const phoneNumberInputs = $("input[name='phone']");
+
+//Add the validation message after the phoneNumberInput
+phoneNumberInputs.after('<div class="phone-status hide"></div>');
+const phoneStatus = $('.phone-status');
+
+phoneNumberInputs.each(function () {
+// const phoneNumberInput =⁄ phoneNumberInputs.eq(el);
+const phoneNumberInput = $(this);
+
+// Initialize intlTelInput
+const iti = window.intlTelInput(phoneNumberInput[0], {
+initialCountry: 'auto',
+nationalMode: false, // da lasciare
+utilsScript:
+'https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.8/js/utils.js?1603274336113',
+geoIpLookup: function (success, failure) {
+$.get(
+IPinfoToken
+? 'https://ipinfo.io?token=' + IPinfoToken
+: 'https://ipinfo.io',
+function () {},
+'jsonp'
+).always(function (resp) {
+var countryCode = resp && resp.country ? resp.country : 'us';
+success(countryCode);
+});
+},
+});
+
+itiIstances.push(iti);
+
+function validatePhone() {
+// intlTelInput validation error
+const errorMap = [
+'Invalid number',
+'Invalid country code',
+'Too short',
+'Too long',
+'Invalid number',
+];
+
+resetPhoneState();
+if (phoneNumberInput.val().trim()) {
+if (iti.isValidNumber()) {
+phoneNumberInputs
+.removeClass('invalid-phone')
+.addClass('valid-phone');
+
+phoneStatus.html('✓ Valid').removeClass('hide');
+
+submitButton.removeClass('disabled-button');
+zapierPhoneData.val(iti.getNumber());
+} else {
+phoneNumberInputs
+.removeClass('valid-phone')
+.addClass('invalid-phone');
+
+phoneStatus
+.removeClass('hide')
+.html(errorMap[iti.getValidationError()]);
+
+submitButton.addClass('disabled-button');
+}
+}
+}
+
+validate = validatePhone;
+
+// Validate the phone number on keyup and change
+phoneNumberInput.on('keyup change', validatePhone);
+
+phoneNumberInput.on('countrychange', function () {
+itiIstances.forEach(function (el) {
+const iso = iti.getSelectedCountryData().iso2;
+if (iso) {
+el.setCountry(iso);
+validatePhone();
+}
+});
+});
+
+// Reset the phone state messages and sets the phone number with intlTelInput
+let firstLoad = true;
+function resetPhoneState() {
+phoneNumberInputs.removeClass('error');
+$('.phone-status').addClass('hide').html('');
+if (firstLoad === true) {
+iti.setNumber($('#cf_contact_phone').val());
+firstLoad = false;
+} else {
+iti.setNumber(iti.getNumber());
+}
+}
+resetPhoneState();
+});
+
+itiIstances[0].promise.then(function () {
+validate();
+});
+});
+</script>

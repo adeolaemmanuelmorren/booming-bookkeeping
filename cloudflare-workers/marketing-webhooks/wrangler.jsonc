@@ -1,0 +1,71 @@
+/**
+ * Marketing Webhook Processor
+ *
+ * Receives marketing webhooks, queues them, enriches provider data,
+ * transforms payloads to Segment HTTP API events, and sends them to Segment.
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "marketing-webhooks",
+	"account_id": "3e36d14845959c97bd8f93f25552f2eb",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-04-25",
+	"observability": {
+		"enabled": true,
+	},
+	"upload_source_maps": true,
+	"compatibility_flags": ["nodejs_compat"],
+
+	"vars": {
+		"ACTIVE_CAMPAIGN_SEGMENT_ANONYMOUS_ID_FIELD_IDS": "39",
+		"SEGMENT_API_URL": "https://api.segment.io",
+	},
+
+	"kv_namespaces": [
+		{
+			"binding": "DLQ_KV",
+			"id": "036fa053f2eb4ed0bfca1e331f48218d",
+		},
+	],
+
+	"queues": {
+		"producers": [
+			{
+				"queue": "marketing-webhooks-queue",
+				"binding": "WEBHOOK_QUEUE",
+			},
+			{
+				"queue": "marketing-webhooks-dlq",
+				"binding": "DLQ_QUEUE",
+			},
+		],
+		"consumers": [
+			{
+				"queue": "marketing-webhooks-queue",
+				"max_batch_size": 10,
+				"max_batch_timeout": 5,
+				"max_retries": 3,
+				"dead_letter_queue": "marketing-webhooks-dlq",
+			},
+			{
+				"queue": "marketing-webhooks-dlq",
+				"max_batch_size": 50,
+				"max_batch_timeout": 10,
+			},
+		],
+	},
+
+	/**
+	 * Required secrets:
+	 *   wrangler secret put SEGMENT_WRITE_KEY
+	 *   wrangler secret put ACTIVE_CAMPAIGN_API_URL
+	 *   wrangler secret put ACTIVE_CAMPAIGN_API_TOKEN
+	 *   wrangler secret put ACTIVE_CAMPAIGN_WEBHOOK_SECRET
+	 *   wrangler secret put SHOPIFY_STORE_DOMAIN
+	 *   wrangler secret put SHOPIFY_CLIENT_ID
+	 *   wrangler secret put SHOPIFY_CLIENT_SECRET
+	 *   wrangler secret put TEST_ENDPOINT_TOKEN  // optional, protects production __test endpoints
+	 *
+	 * Use SEGMENT_API_URL="https://events.eu1.segmentapis.com" for an EU Segment source.
+	 */
+}

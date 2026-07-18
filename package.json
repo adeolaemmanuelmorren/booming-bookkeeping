@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "scripts": {
+    "build:clickfunnels": "node clickfunnels/scripts/build-snippets.mjs",
+    "publish:clickfunnels": "npm --prefix cloudflare-workers/reverse-proxy run publish:clickfunnels --",
+    "publish:clickfunnels:versioned": "npm --prefix cloudflare-workers/reverse-proxy run publish:clickfunnels:versioned --"
+  }
+}

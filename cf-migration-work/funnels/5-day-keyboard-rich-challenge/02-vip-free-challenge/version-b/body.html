@@ -1,0 +1,267 @@
+<!--
+Body scripts for this funnel step.
+Paste scripts that belong in the page body/footer below this comment.
+-->
+<!-- © 2023 CF Pro Tools | Vimeo Autoplay Unmute Restart 1 -->
+<script
+  src="https://cdn.cfptaddons.com/e74fd7fe-3746-4724-900c-cd680ecbaced.js"
+  name="Vimeo Autoplay Unmute Restart 1"
+  defer="defer"
+></script>
+
+<!-- © 2025 CF Pro Tools | Show Only These Products VIPFC-2 -->
+<script
+  src="https://cdn.cfptaddons.com/a3f6b2af-7cbf-45d0-a8ac-8ad5cb865375.js"
+  name="Show Only These Products VIPFC-2"
+  defer="defer"
+></script>
+
+<script type="text/javascript">
+  (function (e, t, o, n, p, r, i) {
+    e.visitorGlobalObjectAlias = n;
+    e[e.visitorGlobalObjectAlias] =
+      e[e.visitorGlobalObjectAlias] ||
+      function () {
+        (e[e.visitorGlobalObjectAlias].q =
+          e[e.visitorGlobalObjectAlias].q || []).push(arguments);
+      };
+    e[e.visitorGlobalObjectAlias].l = new Date().getTime();
+    r = t.createElement("script");
+    r.src = o;
+    r.async = true;
+    i = t.getElementsByTagName("script")[0];
+    i.parentNode.insertBefore(r, i);
+  })(
+    window,
+    document,
+    "https://diffuser-cdn.app-us1.com/diffuser/diffuser.js",
+    "vgo",
+  );
+  vgo("setAccount", "252390389");
+  vgo("setTrackByDefault", true);
+
+  vgo("process");
+</script>
+
+<script type="text/javascript">
+  $(function () {
+    const IPinfoToken = "f6106ad2dcab3d";
+
+    const itiIstances = [];
+    let validate;
+    // Add Zapier hidden input filed
+    $("#cfAR").append('<input type="hidden" id="intl-phone">');
+    const zapierPhoneData = $("#intl-phone");
+
+    // The phoneNumberInput automatically finds the form "submit" button
+    const submitButton = $('a[href="#submit-form"]');
+
+    // The phoneNumberInput automatically finds the phone input filed
+    const phoneNumberInputs = $("input[name='phone']");
+
+    //Add the validation message after the phoneNumberInput
+    phoneNumberInputs.after('<div class="phone-status hide"></div>');
+    const phoneStatus = $(".phone-status");
+
+    phoneNumberInputs.each(function () {
+      // const phoneNumberInput =⁄ phoneNumberInputs.eq(el);
+      const phoneNumberInput = $(this);
+
+      // Initialize intlTelInput
+      const iti = window.intlTelInput(phoneNumberInput[0], {
+        initialCountry: "auto",
+        nationalMode: false, // da lasciare
+        utilsScript:
+          "https://cdnjs.cloudflare.com/ajax/libs/intl-tel-input/17.0.8/js/utils.js?1603274336113",
+        geoIpLookup: function (success, failure) {
+          $.get(
+            IPinfoToken
+              ? "https://ipinfo.io?token=" + IPinfoToken
+              : "https://ipinfo.io",
+            function () {},
+            "jsonp",
+          ).always(function (resp) {
+            var countryCode = resp && resp.country ? resp.country : "us";
+            success(countryCode);
+          });
+        },
+      });
+
+      itiIstances.push(iti);
+
+      function validatePhone() {
+        // intlTelInput validation error
+        const errorMap = [
+          "Invalid number",
+          "Invalid country code",
+          "Too short",
+          "Too long",
+          "Invalid number",
+        ];
+
+        resetPhoneState();
+        if (phoneNumberInput.val().trim()) {
+          if (iti.isValidNumber()) {
+            phoneNumberInputs
+              .removeClass("invalid-phone")
+              .addClass("valid-phone");
+
+            phoneStatus.html("✓ Valid").removeClass("hide");
+
+            submitButton.removeClass("disabled-button");
+            zapierPhoneData.val(iti.getNumber());
+          } else {
+            phoneNumberInputs
+              .removeClass("valid-phone")
+              .addClass("invalid-phone");
+
+            phoneStatus
+              .removeClass("hide")
+              .html(errorMap[iti.getValidationError()]);
+
+            submitButton.addClass("disabled-button");
+          }
+        }
+      }
+
+      validate = validatePhone;
+
+      // Validate the phone number on keyup and change
+      phoneNumberInput.on("keyup change", validatePhone);
+
+      phoneNumberInput.on("countrychange", function () {
+        itiIstances.forEach(function (el) {
+          const iso = iti.getSelectedCountryData().iso2;
+          if (iso) {
+            el.setCountry(iso);
+            validatePhone();
+          }
+        });
+      });
+
+      // Reset the phone state messages and sets the phone number with intlTelInput
+      let firstLoad = true;
+      function resetPhoneState() {
+        phoneNumberInputs.removeClass("error");
+        $(".phone-status").addClass("hide").html("");
+        if (firstLoad === true) {
+          iti.setNumber($("#cf_contact_phone").val());
+          firstLoad = false;
+        } else {
+          iti.setNumber(iti.getNumber());
+        }
+      }
+      resetPhoneState();
+    });
+
+    itiIstances[0].promise.then(function () {
+      validate();
+    });
+  });
+</script>
+
+<!-- Google Tag Manager (noscript - GTM-MSSDW42T) Testing -->
+<noscript>
+  <iframe
+    src="https://www.googletagmanager.com/ns.html?id=GTM-MSSDW42T"
+    height="0"
+    width="0"
+    style="display: none; visibility: hidden"
+  ></iframe>
+</noscript>
+
+<!-- Google Tag Manager (noscript - GTM-MSSDW42T) Testing -->
+<noscript>
+  <iframe
+    src="https://www.googletagmanager.com/ns.html?id=GTM-MSSDW42T"
+    height="0"
+    width="0"
+    style="display: none; visibility: hidden"
+  ></iframe>
+</noscript>
+
+<script>
+  // SHA-256 hash function
+  async function sha256(text) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  const waitForButton = setInterval(function () {
+    const btn = document.querySelector(
+      'a[href="#submit-form"], button[type="submit"]',
+    );
+    const fullName = document.querySelector('input[name="name"]');
+    const email = document.querySelector('input[name="email"]');
+    const phone = document.querySelector('input[name="phone"]');
+    const city = document.querySelector('input[name="shipping_city"]');
+    const state = document.querySelector('input[name="shipping_state"]');
+    const zip = document.querySelector('input[name="shipping_zip"]');
+    const country = document.querySelector('select[name="shipping_country"]');
+
+    if (btn && fullName && email && phone) {
+      clearInterval(waitForButton);
+
+      btn.addEventListener("click", async function () {
+        const nameVal = fullName.value.trim();
+        const [first_name_raw, ...rest] = nameVal.split(" ");
+        const first_name = (first_name_raw || "").toLowerCase();
+        const last_name = rest.join(" ").toLowerCase() || "";
+
+        const emailVal = email.value.trim().toLowerCase();
+        const phoneVal = phone.value.trim().replace(/\D/g, "");
+        const cityVal = city?.value.trim().toLowerCase() || "";
+        const stateVal = state?.value.trim().toLowerCase() || "";
+        const zipVal = zip?.value.trim() || "";
+        const countryVal = country?.value.trim().toLowerCase() || "";
+
+        if (
+          !first_name ||
+          !last_name ||
+          !emailVal.includes("@") ||
+          phoneVal.length < 6
+        ) {
+          return;
+        }
+
+        const fbp = (document.cookie.match(/_fbp=([^;]+)/) || [])[1] || "";
+        const fbc = (document.cookie.match(/_fbc=([^;]+)/) || [])[1] || "";
+        const eventId = "btvip_" + Date.now();
+        const externalId = "external_" + Date.now();
+
+        const [emailHashed, phoneHashed, fnHashed, lnHashed] =
+          await Promise.all([
+            sha256(emailVal),
+            sha256(phoneVal),
+            sha256(first_name),
+            sha256(last_name),
+          ]);
+
+        // ✅ Push data to GTM — GTM handles fbq() and CAPI
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({
+          event: "bt_krc_vip_paid_47",
+          email: emailHashed,
+          phone: phoneHashed,
+          first_name: fnHashed,
+          last_name: lnHashed,
+          city: cityVal,
+          state: stateVal,
+          zip: zipVal,
+          country: countryVal,
+          external_id: externalId,
+          fbp,
+          fbc,
+          event_id: eventId,
+          content_type: "krc-paid-vip",
+          value: 47.0,
+          currency: "USD",
+        });
+      });
+    }
+  }, 300);
+</script>

@@ -1,0 +1,94 @@
+<!--
+Body scripts for this funnel step.
+Paste scripts that belong in the page body/footer below this comment.
+-->
+<script>
+    (function(e,t,o,n,p,r,i){e.visitorGlobalObjectAlias=n;e[e.visitorGlobalObjectAlias]=e[e.visitorGlobalObjectAlias]||function(){(e[e.visitorGlobalObjectAlias].q=e[e.visitorGlobalObjectAlias].q||[]).push(arguments)};e[e.visitorGlobalObjectAlias].l=(new Date).getTime();r=t.createElement("script");r.src=o;r.async=true;i=t.getElementsByTagName("script")[0];i.parentNode.insertBefore(r,i)})(window,document,"https://diffuser-cdn.app-us1.com/diffuser/diffuser.js","vgo");
+    vgo('setAccount', '252390389');
+    vgo('setTrackByDefault', true);
+
+    vgo('process');
+</script>
+
+
+<!-- Google Tag Manager (noscript - GTM-MSSDW42T) Testing -->
+<noscript>
+  <iframe src="https://www.googletagmanager.com/ns.html?id=GTM-MSSDW42T"
+  height="0" width="0" style="display:none;visibility:hidden"></iframe>
+</noscript>
+
+<script>
+  // SHA-256 hash function
+  async function sha256(text) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  const waitForButton = setInterval(function () {
+    const btn = document.querySelector('a[href="#submit-form"], button[type="submit"]');
+    const fullName = document.querySelector('input[name="name"]');
+    const email = document.querySelector('input[name="email"]');
+    const phone = document.querySelector('input[name="phone"]');
+    const city = document.querySelector('input[name="city"]');
+    const state = document.querySelector('input[name="state"]');
+    const zip = document.querySelector('input[name="zip"]');
+    const country = document.querySelector('select[name="country"]');
+
+    if (btn && fullName && email && phone) {
+      clearInterval(waitForButton);
+
+      btn.addEventListener('click', async function () {
+        const nameVal = fullName.value.trim();
+        const [first_name_raw, ...rest] = nameVal.split(" ");
+        const first_name = (first_name_raw || '').toLowerCase();
+        const last_name = rest.join(" ").toLowerCase() || '';
+
+        const emailVal = email.value.trim().toLowerCase();
+        const phoneVal = phone.value.trim().replace(/\D/g, '');
+        const cityVal = city?.value.trim().toLowerCase() || '';
+        const stateVal = state?.value.trim().toLowerCase() || '';
+        const zipVal = zip?.value.trim() || '';
+        const countryVal = country?.value.trim().toLowerCase() || '';
+
+        if (!first_name || !last_name || !emailVal.includes('@') || phoneVal.length < 6) {
+          return;
+        }
+
+        const fbp = (document.cookie.match(/_fbp=([^;]+)/) || [])[1] || '';
+        const fbc = (document.cookie.match(/_fbc=([^;]+)/) || [])[1] || '';
+        const eventId = 'bbb_997' + Date.now();
+		const externalId = 'external_' + Date.now();
+
+        const [emailHashed, phoneHashed, fnHashed, lnHashed] = await Promise.all([
+          sha256(emailVal),
+          sha256(phoneVal),
+          sha256(first_name),
+          sha256(last_name)
+        ]);
+
+        // ✅ Push data to GTM — GTM handles fbq() and CAPI
+        window.dataLayer = window.dataLayer || [];
+        window.dataLayer.push({
+          event: 'bbb_997',
+          email: emailHashed,
+          phone: phoneHashed,
+          first_name: fnHashed,
+          last_name: lnHashed,
+          city: cityVal,
+          state: stateVal,
+          zip: zipVal,
+          country: countryVal,
+          external_id: externalId,
+          fbp,
+          fbc,
+          event_id: eventId,
+          content_type: 'bbb-paid',
+          value: 4997.00,
+          currency: 'USD'
+        });
+      });
+    }
+  }, 300);
+</script>
