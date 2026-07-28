@@ -3,10 +3,18 @@ config {
   description: "Successful Stripe charges enriched with customer, invoice, Checkout, line-item, product, and discount signals.",
   tags: ["intermediate", "stripe", "payments"],
   bigquery: {
-    partitionBy: "DATE(payment_time)",
     clusterBy: ["customer_id", "subscription_id"],
   },
 }
+
+js {
+  const { dropPartitionedTableOnce } = require("includes/table_migrations");
+}
+
+pre_operations {
+  ${dropPartitionedTableOnce(self())}
+}
+
 
 with successful_charges as (
   select *
@@ -155,6 +163,7 @@ select
     coalesce(candidate.line_item_signal, '')
   )) as classification_signal,
   charge.receipt_url,
+  charge.metadata_products,
   charge.livemode
 from successful_charges as charge
 left join ${ref("stg_stripe_customers")} as customer
@@ -169,4 +178,3 @@ left join candidate_summary as candidate
   on candidate.charge_id = charge.charge_id
 left join ${ref("int_stripe_payment_discounts")} as discount
   on discount.charge_id = charge.charge_id
-

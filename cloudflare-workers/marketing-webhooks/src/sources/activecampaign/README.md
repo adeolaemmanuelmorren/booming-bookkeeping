@@ -6,7 +6,6 @@ This source accepts ActiveCampaign's form-encoded provider webhooks at `POST /we
 
 ```text
 form-encoded webhook
-  -> shared-secret verification
   -> parser.ts
   -> contact_tag_added validation
   -> Cloudflare Queue
@@ -18,7 +17,6 @@ form-encoded webhook
 
 - [index.ts](index.ts): source registration, supported topics, parser, and enricher wiring.
 - [parser.ts](parser.ts): bracketed ActiveCampaign POST-field parsing.
-- [auth.ts](auth.ts): fail-closed custom-header authentication for deployed requests.
 - [types.ts](types.ts): webhook and API contact contracts.
 - [enricher.ts](enricher.ts): queued API v3 contact lookup.
 - [extractors.ts](extractors.ts): identity, tag, and Segment anonymous-ID extraction.

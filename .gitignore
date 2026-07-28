@@ -7,6 +7,8 @@ build/
 coverage/
 .nyc_output/
 *.tsbuildinfo
+__pycache__/
+*.py[cod]
 
 # Cloudflare Workers
 .wrangler/
@@ -20,6 +22,7 @@ coverage/
 .df-credentials.json
 
 # Environment files and local secrets
+/envs.md
 .env
 .env.*
 !.env.example
@@ -58,3 +61,9 @@ Thumbs.db
 .tmp/
 tmp/
 temp/
+
+# Fivetran Connector SDK local secrets and debug output
+/fivetran/docusign/deployment/configuration.json
+/fivetran/docusign/deployment/state.json
+/fivetran/docusign/deployment/files/
+/fivetran/docusign/.venv/

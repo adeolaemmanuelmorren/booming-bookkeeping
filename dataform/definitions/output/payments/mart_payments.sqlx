@@ -1,10 +1,10 @@
 config {
   type: "table",
-  description: "Canonical successful Stripe payments at one row per charge, with product and repeat-payment classification.",
-  tags: ["output", "stripe", "payments"],
+  description: "Canonical successful payments across both Stripe accounts, with product, profile, and repeat-payment classification.",
+  tags: ["output", "stripe", "stripe_kajabi", "payments"],
   assertions: {
-    uniqueKey: ["payment_id"],
-    nonNull: ["payment_id", "payment_time", "currency", "amount_paid", "product_name", "payment_occurrence_type", "is_repeat_payment"],
+    uniqueKey: ["payment_source", "payment_id"],
+    nonNull: ["payment_source", "payment_id", "payment_time", "currency", "amount_paid", "product_name", "payment_occurrence_type", "is_repeat_payment"],
     rowConditions: [
       "amount_paid >= 0",
       "refund_amount >= 0",
@@ -12,59 +12,61 @@ config {
     ],
   },
   bigquery: {
-    partitionBy: "DATE(payment_time)",
     clusterBy: ["product_rule", "payment_occurrence_type", "is_repeat_payment"],
   },
 }
 
-select
-  payment_id,
-  payment_time,
-  payment_date,
-  customer_id,
-  payment_email,
-  payment_name,
-  payment_phone,
-  currency,
-  amount_paid,
-  refund_amount,
-  net_amount,
-  has_refund,
-  product_id,
-  product_name,
-  product_variant,
-  catalog_price_id as price_id,
-  catalog_plan_id as plan_id,
-  product_rule,
-  product_classification_method,
-  is_product_classified,
-  payment_sequence_number,
-  payment_occurrence_type,
-  is_repeat_payment,
-  payment_intent_id,
-  payment_method_id,
-  invoice_id,
-  subscription_id,
-  checkout_session_id,
-  payment_link_id,
-  invoice_billing_reason,
-  checkout_mode,
-  has_discount,
-  discount_amount,
-  discount_ids,
-  coupon_ids,
-  coupon_names,
-  promotion_code_ids,
-  promotion_codes,
-  coupon_amount_off,
-  coupon_percent_off,
-  charge_description,
-  calculated_statement_descriptor,
-  statement_descriptor,
-  payment_intent_description,
-  invoice_description,
-  book_product_text,
-  receipt_url,
-  livemode
-from ${ref("int_stripe_payment_occurrence")}
+js {
+  const { dropPartitionedTableOnce } = require("includes/table_migrations");
+}
 
+pre_operations {
+  ${dropPartitionedTableOnce(self())}
+}
+
+
+with email_profiles as (
+  select
+    profile_id,
+    email
+  from ${ref("int_resolved_identifiers")}
+  cross join unnest(emails) as email
+),
+
+phone_profiles as (
+  select
+    profile_id,
+    phone
+  from ${ref("int_resolved_identifiers")}
+  cross join unnest(phones) as phone
+),
+
+automatically_resolved as (
+  select
+    payments.*,
+    coalesce(email_profiles.profile_id, phone_profiles.profile_id) as automatic_profile_id
+  from ${ref("int_all_stripe_payments")} payments
+  left join email_profiles
+    on payments.payment_email = email_profiles.email
+  left join phone_profiles
+    on regexp_replace(payments.payment_phone, r'[^0-9+]', '') = phone_profiles.phone
+  qualify row_number() over (
+    partition by payments.payment_source, payments.payment_id
+    order by coalesce(email_profiles.profile_id, phone_profiles.profile_id)
+  ) = 1
+)
+
+select
+  payments.*,
+  manual.manual_profile_id,
+  coalesce(manual.manual_profile_id, automatic_profile_id) as profile_id,
+  case
+    when manual.manual_profile_id is not null then 'manual'
+    when automatic_profile_id is not null then 'automatic'
+    else 'unattributed'
+  end as attribution_method,
+  manual.manual_link_created_at,
+  manual.manual_link_created_by
+from automatically_resolved payments
+left join ${ref("int_manual_payment_profile_links_latest")} manual
+  using (payment_id)

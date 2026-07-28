@@ -6,7 +6,6 @@ This folder defines the plugin boundary for webhook sources handled by the `mark
 
 Each source owns how to:
 
-- authenticate provider requests when the provider supports signatures or custom headers
 - identify supported topics
 - validate payloads
 - transform validated payloads into Segment events
@@ -29,10 +28,9 @@ For a new source:
 1. Add a folder under `sources/<source_name>`.
 2. Implement one handler per topic.
 3. Export a `MarketingSource` with a stable `name`.
-4. Verify a provider signature or shared secret before parsing.
-5. Add a source request parser when the provider does not send JSON.
-6. Register it in [registry.ts](registry.ts).
-7. Add tests for authentication, parsing, validation, enrichment, and transformed Segment events.
+4. Add a source request parser when the provider does not send JSON.
+5. Register it in [registry.ts](registry.ts).
+6. Add tests for parsing, validation, enrichment, and transformed Segment events.
 
 ## Placement Rules
 

@@ -41,8 +41,8 @@ select
   statement_descriptor,
   statement_descriptor_suffix,
   metadata,
+  nullif(trim(json_value(metadata, '$.products')), '') as metadata_products,
   livemode,
   _fivetran_synced
 from `able-folio-499722.stripe.charge`
 qualify row_number() over (partition by id order by _fivetran_synced desc) = 1
-

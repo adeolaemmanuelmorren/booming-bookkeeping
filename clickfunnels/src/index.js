@@ -1,5 +1,13 @@
 import { bindAttrTrackingTriggers, scheduleAttrTracking } from "./attr-tracking.js";
 import {
+  createEventId,
+  getAnonymousId,
+  page,
+  setAnonymousId,
+  waitForAnalytics,
+} from "./analytics-client.js";
+import { getPageContext, sendIdentify, sendTrack } from "./analytics-track.js";
+import {
   bindActiveCampaignNativeSubmitHydration,
   hydrateActiveCampaignForms,
   observeActiveCampaignForms,
@@ -7,28 +15,34 @@ import {
 import { getAttrEventProperties, pingAttributionEndpoint, writeLocalAttributionMirror } from "./attribution.js";
 import { CONFIG } from "./config.js";
 import { getCookie, parseJsonCookie } from "./cookies.js";
-import { bindSegmentEmitterToDataLayer } from "./datalayer.js";
 import {
   bindFormSubmitTracking,
   getSelectedCheckoutProducts,
 } from "./forms.js";
 import { bindIdentifyInputs, observeIdentifyInputs } from "./identity.js";
 import {
+  pollForConfirmedPurchases,
+  registerPurchaseAttempt,
+  startPurchaseConfirmationPolling,
+} from "./purchase-confirmation.js";
+import {
   addAnonymousIdToCurrentUrl,
   bindCrossDomainLinkDecoration,
   decorateCrossDomainLinks,
   observeCrossDomainLinks,
 } from "./links.js";
-import { loadSegmentAnalytics } from "./segment-loader.js";
-import { createEventId, getSegmentAnonymousId, waitForSegment } from "./segment-user.js";
-import { getPageContext, sendIdentify, sendTrack } from "./segment-track.js";
+import { loadJitsuAnalytics } from "./jitsu-loader.js";
+import { listenForKajabiPurchaseDataLayerEvents } from "./kajabi-purchase-diagnostic.js";
 
-loadSegmentAnalytics();
+listenForKajabiPurchaseDataLayerEvents();
+loadJitsuAnalytics();
 
-function runDelayedAfterSegment(callback) {
+var hasInitialized = false;
+
+function runDelayedAfterAnalytics(callback) {
   var delays = [0, 250, 750, 1500, 3000, 5000, 8000];
 
-  waitForSegment(function() {
+  waitForAnalytics(function() {
     delays.forEach(function(delay) {
       window.setTimeout(callback, delay);
     });
@@ -36,17 +50,24 @@ function runDelayedAfterSegment(callback) {
 }
 
 function init() {
+  if (hasInitialized) {
+    return;
+  }
+
+  hasInitialized = true;
   writeLocalAttributionMirror("init");
-  bindSegmentEmitterToDataLayer();
-  waitForSegment(function(anonymousId) {
+  waitForAnalytics(function(anonymousId) {
+    setAnonymousId(anonymousId);
     addAnonymousIdToCurrentUrl(anonymousId);
+    page();
+    startPurchaseConfirmationPolling();
   });
   hydrateActiveCampaignForms();
-  runDelayedAfterSegment(function() {
+  runDelayedAfterAnalytics(function() {
     hydrateActiveCampaignForms();
   });
   decorateCrossDomainLinks();
-  runDelayedAfterSegment(function() {
+  runDelayedAfterAnalytics(function() {
     decorateCrossDomainLinks();
   });
   scheduleAttrTracking();
@@ -65,14 +86,14 @@ window.BoomClickFunnels = {
   getCookie,
   parseJsonCookie,
   getAttributionProperties: getAttrEventProperties,
-  getSegmentAnonymousId,
-  waitForSegment,
+  getAnonymousId,
+  waitForAnalytics,
   createEventId,
   getPageContext,
-  loadSegmentAnalytics,
+  loadJitsuAnalytics,
+  listenForKajabiPurchaseDataLayerEvents,
   sendTrack,
   sendIdentify,
-  bindSegmentEmitterToDataLayer,
   pingAttributionEndpoint,
   bindActiveCampaignNativeSubmitHydration,
   addAnonymousIdToCurrentUrl,
@@ -80,6 +101,9 @@ window.BoomClickFunnels = {
   decorateCrossDomainLinks,
   bindFormSubmitTracking,
   getSelectedCheckoutProducts,
+  pollForConfirmedPurchases,
+  registerPurchaseAttempt,
+  startPurchaseConfirmationPolling,
 };
 
 if (document.readyState === "loading") {

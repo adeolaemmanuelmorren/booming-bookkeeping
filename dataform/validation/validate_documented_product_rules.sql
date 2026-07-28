@@ -51,6 +51,28 @@ raw_direct_rules as (
   union all
 
   select
+    'top_tax_loopholes',
+    count(*)
+  from successful_charges
+  where lower(trim(json_value(
+    to_json_string(successful_charges),
+    '$.metadata.products'
+  ))) = 'top tax loopholes for bookkeeping business owners'
+
+  union all
+
+  select
+    'mentorship_full_payment',
+    count(*)
+  from successful_charges
+  where lower(trim(json_value(
+    to_json_string(successful_charges),
+    '$.metadata.products'
+  ))) = 'booming bookkeeping mentorship program (one-time payment - save $994)'
+
+  union all
+
+  select
     'mentorship_deposit',
     count(*)
   from successful_charges
@@ -160,9 +182,15 @@ raw_catalog_rules as (
 ),
 
 raw_rules as (
-  select * from raw_direct_rules
-  union all
-  select * from raw_catalog_rules
+  select
+    product_rule,
+    sum(raw_payments) as raw_payments
+  from (
+    select * from raw_direct_rules
+    union all
+    select * from raw_catalog_rules
+  )
+  group by product_rule
 ),
 
 mart_rules as (
@@ -172,6 +200,7 @@ mart_rules as (
   from `able-folio-499722.booming_data_analytics.mart_payments`
   where product_rule in (
     'keyboard_rich_book',
+    'top_tax_loopholes',
     'keyboard_rich_challenge_vip',
     'mentorship_deposit',
     'structured_basic_vip',
@@ -187,6 +216,7 @@ documented_rules as (
   select product_rule
   from unnest([
     'keyboard_rich_book',
+    'top_tax_loopholes',
     'keyboard_rich_challenge_vip',
     'mentorship_deposit',
     'structured_basic_vip',

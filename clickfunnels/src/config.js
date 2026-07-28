@@ -1,8 +1,8 @@
-export const ACTIVE_CAMPAIGN_SEGMENT_ANONYMOUS_ID_FIELD_NAMES = [
+export const ACTIVE_CAMPAIGN_ANONYMOUS_ID_FIELD_NAMES = [
   "field[39]",
 ];
 
-export const CLICKFUNNELS_SEGMENT_ANONYMOUS_ID_CUSTOM_TYPES = [
+export const CLICKFUNNELS_ANONYMOUS_ID_CUSTOM_TYPES = [
   "segment_anonymous_id",
 ];
 
@@ -10,13 +10,12 @@ export const CONFIG = {
   attributionEndpoint: "",
   attributionMirrorCookie: "_attr_current_js",
   attributionMirrorHours: 4320,
-  segmentGlobalName: "analytics",
-  segmentProxyRoutePrefix: "route",
-  segmentWriteKey: "REDACTED",
-  segmentReadyTimeoutMs: 1e4,
-  segmentReadyPollMs: 100,
-  activeCampaignAnonymousIdFieldNames: ACTIVE_CAMPAIGN_SEGMENT_ANONYMOUS_ID_FIELD_NAMES,
-  clickFunnelsAnonymousIdCustomTypes: CLICKFUNNELS_SEGMENT_ANONYMOUS_ID_CUSTOM_TYPES,
+  anonymousIdCookieName: "__eventn_id",
+  jitsuGlobalName: "jitsu",
+  jitsuReadyTimeoutMs: 1e4,
+  jitsuReadyPollMs: 100,
+  activeCampaignAnonymousIdFieldNames: ACTIVE_CAMPAIGN_ANONYMOUS_ID_FIELD_NAMES,
+  clickFunnelsAnonymousIdCustomTypes: CLICKFUNNELS_ANONYMOUS_ID_CUSTOM_TYPES,
 };
 
 export const URL_FIELDS = [
@@ -67,8 +66,15 @@ export const ATTR_EVENT_COOKIE_FIELDS = [
   { cookie: "li_fat_id", property: "li_fat_id" },
 ];
 
-export const GA4_STANDARD_EVENT_MAP = {
-  "Form Submitted": "generate_lead",
+export const GA4_EVENT_CONFIG = {
+  "Form Submitted": {
+    eventName: "generate_lead",
+    eventType: "standard_event",
+  },
+  "Order Completed": {
+    eventName: "purchase",
+    eventType: "ecommerce",
+  },
 };
 
 export const TRACKING_HOSTS = [

@@ -3,14 +3,12 @@
  */
 
 import type { MarketingSource, TopicHandler } from "../base";
-import { verifyActiveCampaignWebhookRequest } from "./auth";
 import type { ActiveCampaignEnrichmentResult } from "./enricher";
 import { activeCampaignEnricher } from "./enricher";
 import { contactTagAddedHandler } from "./handlers";
 import { parseActiveCampaignWebhookRequest } from "./parser";
 
 export * from "./types";
-export * from "./auth";
 export * from "./parser";
 export * from "./extractors";
 export * from "./enricher";
@@ -22,7 +20,6 @@ const handlers = new Map<
 
 export const activeCampaignSource: MarketingSource<ActiveCampaignEnrichmentResult> = {
 	name: "activecampaign",
-	verifyRequest: verifyActiveCampaignWebhookRequest,
 	parsePayload: parseActiveCampaignWebhookRequest,
 	handlers,
 	enricher: activeCampaignEnricher,

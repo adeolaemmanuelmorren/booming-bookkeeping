@@ -6,7 +6,6 @@
 export interface MarketingWebhookRuntimeConfig {
 	ACTIVE_CAMPAIGN_API_URL?: string;
 	ACTIVE_CAMPAIGN_API_TOKEN?: string;
-	ACTIVE_CAMPAIGN_WEBHOOK_SECRET?: string;
 	ACTIVE_CAMPAIGN_SEGMENT_ANONYMOUS_ID_FIELD_IDS?: string;
 	ENABLE_TEST_ENDPOINTS?: string;
 	SEGMENT_WRITE_KEY?: string;

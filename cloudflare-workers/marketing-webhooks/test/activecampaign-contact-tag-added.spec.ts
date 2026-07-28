@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createActiveCampaignClient } from "../src/clients";
 import worker from "../src/index";
 import { activeCampaignSource } from "../src/sources/activecampaign";
-import { hasActiveCampaignWebhookSecret } from "../src/sources/activecampaign/auth";
 import { contactTagAddedHandler } from "../src/sources/activecampaign/handlers";
 import { parseActiveCampaignWebhookBody } from "../src/sources/activecampaign/parser";
 
@@ -134,44 +133,9 @@ describe("ActiveCampaign contact_tag_added source", () => {
 		);
 	});
 
-	it("verifies the configured ActiveCampaign custom header", () => {
-		const request = new Request("https://example.com/webhook/activecampaign", {
-			headers: {
-				"X-ActiveCampaign-Webhook-Secret": "test-webhook-secret",
-			},
-		});
-
-		expect(
-			hasActiveCampaignWebhookSecret(request, "test-webhook-secret")
-		).toBe(true);
-		expect(hasActiveCampaignWebhookSecret(request, "wrong-secret")).toBe(
-			false
-		);
-	});
-
-	it("rejects a deployed webhook request without the custom header", async () => {
-		const request = new Request(
-			"https://example.com/webhook/activecampaign",
-			{
-				method: "POST",
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
-				},
-				body: rawPayload,
-			}
-		);
-		const context = createExecutionContext();
-
-		const response = await worker.fetch(request, env, context);
-		await waitOnExecutionContext(context);
-
-		expect(response.status).toBe(401);
-		expect(await response.json()).toEqual({ error: "Unauthorized webhook" });
-	});
-
 	it("accepts the form-encoded webhook at the ActiveCampaign endpoint", async () => {
 		const request = new Request(
-			"http://localhost/webhook/activecampaign",
+			"https://example.com/webhook/activecampaign",
 			{
 				method: "POST",
 				headers: {

@@ -1,0 +1,91 @@
+config {
+  type: "table",
+  description: "First- and last-known attribution traits per resolved profile from touchpoints and dedicated attribution events.",
+  tags: ["intermediate", "attribution"],
+}
+
+with attribution_events_with_profile as (
+  select
+    attribution.attribution_event_id,
+    attribution.attribution_event_time,
+    coalesce(
+      anonymous_profile.profile_id,
+      user_profile.profile_id,
+      email_profile.profile_id
+    ) as profile_id,
+    attribution.fbc,
+    attribution.fbp,
+    attribution.uetsid,
+    attribution.uetvid
+  from ${ref("stg_segment_attribution_params")} attribution
+  left join ${ref("int_identifier_profile_lookup")} anonymous_profile
+    on anonymous_profile.identifier_type = "anonymous_id"
+   and anonymous_profile.identifier_value = attribution.anonymous_id
+  left join ${ref("int_identifier_profile_lookup")} user_profile
+    on user_profile.identifier_type = "user_id"
+   and user_profile.identifier_value = attribution.user_id
+  left join ${ref("int_identifier_profile_lookup")} email_profile
+    on email_profile.identifier_type = "email"
+   and email_profile.identifier_value = attribution.user_id
+),
+
+trait_events as (
+  select
+    concat("touchpoint:", cast(touchpoint_id as string)) as event_id,
+    profile_id,
+    touchpoint_time as event_time,
+    ip_address,
+    user_agent,
+    geo_city,
+    geo_region,
+    geo_country,
+    fbc,
+    fbp,
+    uetsid,
+    uetvid
+  from ${ref("mart_touchpoints_all")}
+  where profile_id is not null
+    and touchpoint_time is not null
+
+  union all
+
+  select
+    concat("attribution:", cast(attribution_event_id as string)) as event_id,
+    profile_id,
+    attribution_event_time as event_time,
+    cast(null as string) as ip_address,
+    cast(null as string) as user_agent,
+    cast(null as string) as geo_city,
+    cast(null as string) as geo_region,
+    cast(null as string) as geo_country,
+    fbc,
+    fbp,
+    uetsid,
+    uetvid
+  from attribution_events_with_profile
+  where profile_id is not null
+    and attribution_event_time is not null
+)
+
+select
+  profile_id,
+  array_agg(ip_address ignore nulls order by event_time, event_id limit 1)[safe_offset(0)] as first_known_ip_address,
+  array_agg(ip_address ignore nulls order by event_time desc, event_id desc limit 1)[safe_offset(0)] as last_known_ip_address,
+  array_agg(user_agent ignore nulls order by event_time, event_id limit 1)[safe_offset(0)] as first_known_user_agent,
+  array_agg(user_agent ignore nulls order by event_time desc, event_id desc limit 1)[safe_offset(0)] as last_known_user_agent,
+  array_agg(geo_city ignore nulls order by event_time, event_id limit 1)[safe_offset(0)] as first_known_geo_city,
+  array_agg(geo_region ignore nulls order by event_time, event_id limit 1)[safe_offset(0)] as first_known_geo_region,
+  array_agg(geo_country ignore nulls order by event_time, event_id limit 1)[safe_offset(0)] as first_known_geo_country,
+  array_agg(geo_city ignore nulls order by event_time desc, event_id desc limit 1)[safe_offset(0)] as last_known_geo_city,
+  array_agg(geo_region ignore nulls order by event_time desc, event_id desc limit 1)[safe_offset(0)] as last_known_geo_region,
+  array_agg(geo_country ignore nulls order by event_time desc, event_id desc limit 1)[safe_offset(0)] as last_known_geo_country,
+  array_agg(fbc ignore nulls order by event_time, event_id limit 1)[safe_offset(0)] as first_known_fbc,
+  array_agg(fbp ignore nulls order by event_time, event_id limit 1)[safe_offset(0)] as first_known_fbp,
+  array_agg(uetsid ignore nulls order by event_time, event_id limit 1)[safe_offset(0)] as first_known_uetsid,
+  array_agg(uetvid ignore nulls order by event_time, event_id limit 1)[safe_offset(0)] as first_known_uetvid,
+  array_agg(fbc ignore nulls order by event_time desc, event_id desc limit 1)[safe_offset(0)] as last_known_fbc,
+  array_agg(fbp ignore nulls order by event_time desc, event_id desc limit 1)[safe_offset(0)] as last_known_fbp,
+  array_agg(uetsid ignore nulls order by event_time desc, event_id desc limit 1)[safe_offset(0)] as last_known_uetsid,
+  array_agg(uetvid ignore nulls order by event_time desc, event_id desc limit 1)[safe_offset(0)] as last_known_uetvid
+from trait_events
+group by profile_id

@@ -1,5 +1,12 @@
 import { CONFIG } from "./config.js";
-import { getSegmentAnonymousId } from "./segment-user.js";
+import { getReadyAnonymousId } from "./analytics-client.js";
+import { getCookie } from "./cookies.js";
+
+var ACTIVE_CAMPAIGN_HONEYPOT_FIELD_NAME = "field[31]";
+var CLICKFUNNELS_HONEYPOT_CUSTOM_TYPE = "hpcheck";
+var CLICKFUNNELS_CUSTOM_TYPE_GARLIC_KEY_PATTERN = /^garlic:.*>input\.custom_type$/;
+var LEGACY_SEGMENT_ANONYMOUS_ID_COOKIE = "ajs_anonymous_id";
+var TRACKING_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function runSafely(callback) {
   try {
@@ -69,8 +76,10 @@ function setFieldValue(input, value) {
 
   input.value = value;
   input.setAttribute("value", value);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.dispatchEvent(new Event("change", { bubbles: true }));
+
+  // ClickFunnels copies the DOM value during submission. Synthetic input
+  // events are unnecessary and make Garlic persist every custom field under
+  // its shared input.custom_type key.
 }
 
 function fillFields(fields, anonymousId) {
@@ -105,8 +114,108 @@ function hydrateClickFunnelsCustomTypeFields(root, anonymousId) {
   });
 }
 
+export function purgeClickFunnelsCustomTypeGarlicState() {
+  var storage;
+
+  try {
+    storage = window.localStorage;
+
+    // Iterate backwards because removeItem changes localStorage indexes.
+    for (var i = storage.length - 1; i >= 0; i -= 1) {
+      var key = storage.key(i);
+
+      if (!CLICKFUNNELS_CUSTOM_TYPE_GARLIC_KEY_PATTERN.test(key || "")) {
+        continue;
+      }
+
+      storage.removeItem(key);
+    }
+  } catch (error) {
+    // Storage can be unavailable in private or restricted browser contexts.
+  }
+}
+
+function normalizeTrackingId(value) {
+  value = String(value || "").trim().replace(/^"+|"+$/g, "");
+
+  if (!TRACKING_ID_PATTERN.test(value)) {
+    return "";
+  }
+
+  return value;
+}
+
+function addKnownTrackingId(knownIds, value) {
+  value = normalizeTrackingId(value);
+
+  if (!value) {
+    return;
+  }
+
+  knownIds[value] = true;
+}
+
+function addFieldTrackingIds(knownIds, fields) {
+  fields.forEach(function(field) {
+    addKnownTrackingId(knownIds, field.value);
+  });
+}
+
+function getKnownTrackingIds(anonymousId) {
+  var knownIds = {};
+
+  addKnownTrackingId(knownIds, anonymousId);
+  addKnownTrackingId(knownIds, getCookie(LEGACY_SEGMENT_ANONYMOUS_ID_COOKIE));
+  addFieldTrackingIds(
+    knownIds,
+    findClickFunnelsCustomTypeFields(document, "segment_anonymous_id"),
+  );
+
+  document.querySelectorAll(
+    'input[name="field[39]"], input[id="field[39]"]',
+  ).forEach(function(field) {
+    addKnownTrackingId(knownIds, field.value);
+  });
+
+  return knownIds;
+}
+
+function clearFieldWhenItContainsTrackingId(field, knownIds) {
+  var value = normalizeTrackingId(field && field.value);
+
+  if (!value || !knownIds[value]) {
+    return false;
+  }
+
+  setFieldValue(field, "");
+  return true;
+}
+
+export function clearTrackingIdsFromHoneypot(anonymousId) {
+  var knownIds = getKnownTrackingIds(anonymousId);
+  var cleared = false;
+
+  // Garlic may restore the shared custom_type value before this bundle runs.
+  // Clear only IDs produced by our tracking; leave real bot values intact.
+  findClickFunnelsCustomTypeFields(
+    document,
+    CLICKFUNNELS_HONEYPOT_CUSTOM_TYPE,
+  ).forEach(function(field) {
+    cleared = clearFieldWhenItContainsTrackingId(field, knownIds) || cleared;
+  });
+
+  document.querySelectorAll(
+    'input[name="' + ACTIVE_CAMPAIGN_HONEYPOT_FIELD_NAME + '"], ' +
+    'input[id="' + ACTIVE_CAMPAIGN_HONEYPOT_FIELD_NAME + '"]',
+  ).forEach(function(field) {
+    cleared = clearFieldWhenItContainsTrackingId(field, knownIds) || cleared;
+  });
+
+  return cleared;
+}
+
 function hydrateActiveCampaignForm(form) {
-  var anonymousId = getSegmentAnonymousId();
+  var anonymousId = getReadyAnonymousId();
 
   if (!isFormElement(form)) {
     return;
@@ -115,6 +224,7 @@ function hydrateActiveCampaignForm(form) {
     return;
   }
 
+  clearTrackingIdsFromHoneypot(anonymousId);
   hydrateClickFunnelsCustomTypeFields(document, anonymousId);
 
   getConfiguredActiveCampaignFieldNames().forEach(function(fieldName) {
@@ -126,9 +236,12 @@ export function hydrateActiveCampaignForms(root) {
   root = root || document;
 
   runSafely(function() {
-    var anonymousId = getSegmentAnonymousId();
+    var anonymousId = getReadyAnonymousId();
+
+    purgeClickFunnelsCustomTypeGarlicState();
 
     if (anonymousId) {
+      clearTrackingIdsFromHoneypot(anonymousId);
       hydrateClickFunnelsCustomTypeFields(root, anonymousId);
     }
 

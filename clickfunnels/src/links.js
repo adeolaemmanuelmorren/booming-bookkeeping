@@ -1,8 +1,8 @@
 import { TRACKING_HOSTS } from "./config.js";
-import { getSegmentAnonymousId } from "./segment-user.js";
+import { getAnonymousId } from "./analytics-client.js";
 import { isRootOrSubdomain } from "./tracking-hosts.js";
 
-var ANONYMOUS_ID_QUERY_PARAM = "ajs_aid";
+var ANONYMOUS_ID_QUERY_PARAMS = ["ajs_aid", "an_aid"];
 
 function runSafely(callback) {
   try {
@@ -39,11 +39,15 @@ export function addAnonymousIdToCurrentUrl(anonymousId) {
   try {
     var url = new URL(window.location.href);
 
-    if (url.searchParams.get(ANONYMOUS_ID_QUERY_PARAM) === anonymousId) {
+    if (ANONYMOUS_ID_QUERY_PARAMS.every(function(paramName) {
+      return url.searchParams.get(paramName) === anonymousId;
+    })) {
       return false;
     }
 
-    url.searchParams.set(ANONYMOUS_ID_QUERY_PARAM, anonymousId);
+    ANONYMOUS_ID_QUERY_PARAMS.forEach(function(paramName) {
+      url.searchParams.set(paramName, anonymousId);
+    });
     window.history.replaceState(window.history.state, "", url.toString());
 
     return true;
@@ -108,7 +112,7 @@ function shouldDecorateUrl(url) {
 }
 
 export function decorateCrossDomainLink(link) {
-  var anonymousId = getSegmentAnonymousId();
+  var anonymousId = getAnonymousId();
   var url = getLinkUrl(link);
 
   if (!anonymousId) {
@@ -118,7 +122,9 @@ export function decorateCrossDomainLink(link) {
     return false;
   }
 
-  url.searchParams.set(ANONYMOUS_ID_QUERY_PARAM, anonymousId);
+  ANONYMOUS_ID_QUERY_PARAMS.forEach(function(paramName) {
+    url.searchParams.set(paramName, anonymousId);
+  });
   link.href = url.toString();
 
   return true;

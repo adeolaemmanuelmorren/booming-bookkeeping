@@ -17,7 +17,6 @@ The Cloudflare Worker owns every variable, secret, and binding listed here. Secr
 | `SEGMENT_WRITE_KEY` | Yes | Authenticates server-side Segment batches. | Queue messages retry and eventually reach the DLQ. |
 | `ACTIVE_CAMPAIGN_API_URL` | Required for ActiveCampaign enrichment | Account-specific API URL from ActiveCampaign Settings -> Developer. It is stored as a Worker secret to keep account configuration out of the repository. | ActiveCampaign events fall back to webhook contact fields. |
 | `ACTIVE_CAMPAIGN_API_TOKEN` | Required for ActiveCampaign enrichment | ActiveCampaign API v3 credential sent in the `Api-Token` header. | ActiveCampaign events fall back to webhook contact fields. |
-| `ACTIVE_CAMPAIGN_WEBHOOK_SECRET` | Yes for the production ActiveCampaign endpoint | Shared value configured as the ActiveCampaign custom header `X-ActiveCampaign-Webhook-Secret`. | Deployed ActiveCampaign webhook requests return `401`. |
 | `SHOPIFY_STORE_DOMAIN` | Required for Shopify enrichment | Shopify store host used for OAuth and Admin API requests. | Shopify enrichment is unavailable. |
 | `SHOPIFY_CLIENT_ID` | Required for Shopify enrichment | Shopify client-credentials identifier. | Shopify enrichment is unavailable. |
 | `SHOPIFY_CLIENT_SECRET` | Required for Shopify enrichment | Shopify client-credentials secret. | Shopify enrichment is unavailable. |

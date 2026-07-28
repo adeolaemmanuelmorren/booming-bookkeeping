@@ -16,6 +16,18 @@ export function getTrackingHost() {
   return TRACKING_HOSTS[0].host;
 }
 
+export function getTrackingRoot() {
+  var hostname = window.location.hostname || "";
+
+  for (var i = 0; i < TRACKING_HOSTS.length; i += 1) {
+    if (isRootOrSubdomain(hostname, TRACKING_HOSTS[i].root)) {
+      return TRACKING_HOSTS[i].root;
+    }
+  }
+
+  return TRACKING_HOSTS[0].root;
+}
+
 export function getAttributionEndpoint() {
   if (CONFIG.attributionEndpoint) {
     return CONFIG.attributionEndpoint;

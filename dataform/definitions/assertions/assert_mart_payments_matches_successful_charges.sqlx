@@ -1,6 +1,6 @@
 config {
   type: "assertion",
-  description: "Fails when mart_payments differs from the raw successful-charge grain or financial totals.",
+  description: "Fails when mart_payments differs from the combined raw successful-charge grain or financial totals.",
   tags: ["assertion", "stripe", "payments"],
 }
 
@@ -10,9 +10,17 @@ with raw as (
     sum(cast(amount as numeric) / 100) as amount_paid,
     sum(cast(amount_refunded as numeric) / 100) as refund_amount,
     sum(cast(amount - amount_refunded as numeric) / 100) as net_amount
-  from `able-folio-499722.stripe.charge`
-  where paid is true
-    and status = 'succeeded'
+  from (
+    select amount, amount_refunded
+    from `able-folio-499722.stripe.charge`
+    where paid is true and status = 'succeeded'
+
+    union all
+
+    select amount, amount_refunded
+    from `able-folio-499722.stripe_kajabi.charge`
+    where paid is true and status = 'succeeded'
+  )
 ),
 
 mart as (
@@ -39,4 +47,3 @@ where raw.payment_count != mart.payment_count
   or raw.amount_paid != mart.amount_paid
   or raw.refund_amount != mart.refund_amount
   or raw.net_amount != mart.net_amount
-

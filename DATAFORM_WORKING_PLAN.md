@@ -154,11 +154,14 @@ The event source should be `activecampaign.contact_tag`, using:
 - `contact_tag.c_date` as the tag-assignment/form-submission timestamp.
 - `activecampaign.contact` for normalized email, phone, and name.
 
-The configured tag names from the request are:
+The initially supplied tag names were:
 
 - `[KRC] RFC START - 07/20/26`
 - `[KRC] RFC START - 05/26/25`
 - `[CW] Registered for Webinar START`
+
+These were later found to be downstream automation-stage tags, not the actual
+registration tags. See clarification round 6 for the corrected configuration.
 
 Current blocker: the ActiveCampaign dataset has 4,379,904 contact-tag rows and 539 distinct tag IDs, but it does not currently expose the tag-definition table that maps tag IDs to tag names. KNYC's equivalent model relies on three source objects: contacts, contact-tag associations, and tags. The missing object needs to sync, or an explicit ID-to-name mapping must be supplied.
 
@@ -542,7 +545,7 @@ Owner decisions and verified source changes:
 - The ActiveCampaign `tags` table is now synced.
 - Keep every successful Stripe charge in `mart_payments`, but do not treat subscription renewals, later payment-plan installments, or explicit balance payments as new `Order Completed` conversions.
 
-### ActiveCampaign tag verification
+### Initial ActiveCampaign tag verification
 
 The required tag rows are present and active in `able-folio-499722.activecampaign.tags`:
 
@@ -553,6 +556,10 @@ The required tag rows are present and active in `able-folio-499722.activecampaig
 | `677` | `[KRC] RFC START - 07/20/26` |
 
 The configuration remains name-based so future tags can be added without embedding source IDs in the business logic.
+
+This initial configuration was superseded after the ActiveCampaign assignment
+sequence showed that the `Registered` tags occur before the `RFC START`/`START`
+tags and contain the actual registration population.
 
 ### Stripe repeat-payment flag
 
@@ -575,3 +582,142 @@ Rules:
 7. Revenue/payment reporting continues to use every successful charge. Only Order Completed conversion outputs and conversion-focused reverse ETL filter to `is_repeat_payment = FALSE`.
 
 Sequence logic applies only within a real subscription/payment-plan relationship. A later independent one-time purchase by the same customer is a new order, not a repeat payment merely because the customer has purchased before.
+
+## Implementation status — 2026-07-23
+
+The approved Boom framework is implemented in:
+
+```text
+/Users/adeola/Boom Bookkeeping/dataform
+```
+
+The live BigQuery output dataset is:
+
+```text
+able-folio-499722.booming_data_analytics
+```
+
+The project uses `America/Los_Angeles` for Pacific-time business dates.
+
+### Implemented model groups
+
+- Segment page views, dedicated attribution events, identifies, forms, and Order Completed staging.
+- ActiveCampaign contacts, tags, contact-tag assignments, and server-side form submissions.
+- Original Stripe and Kajabi Stripe staging and intermediate payment enrichment.
+- Product classification and payment occurrence logic.
+- Unified server-side `mart_payments`.
+- Separate client-side `mart_payments_client_side`.
+- Separate client- and server-side form-submission marts.
+- Checkout-start and payment-info-submitted client-side outputs.
+- Identity resolution, sessions, first/all/last touchpoints, and attribution traits.
+- Google Ads and Meta Ads staging and unified ad performance.
+- Customer, product-sales, multi-touch attribution, acquisition-performance, and landing-page outputs.
+- Append-only manual Stripe payment attribution and supporting status/search outputs.
+- Warehouse reverse-ETL registration and Purchase outputs following `WAREHOUSE_CONVERSION_EVENT_SPEC.md`.
+
+### Live validation results
+
+| Check | Result |
+|---|---:|
+| Successful server-side payments | 314,664 |
+| Original Stripe payments | 239,554 |
+| Kajabi Stripe payments | 75,110 |
+| Initial/one-time payments | 216,542 |
+| Repeat payments | 98,122 |
+| ActiveCampaign server form submissions | 67,496 |
+| Distinct ActiveCampaign registration contacts | 67,302 |
+| Segment client form submissions | 510 |
+| Client-side payment events | 507 |
+| Historical Kajabi checkout submissions in the client payment mart | 494 |
+| Native Segment Order Completed events in the client payment mart | 13 |
+| Inferred checkout-start events | 343 |
+| Sessions | 733,890 |
+| Touchpoints | 733,890 |
+| Google/Meta ad-performance rows | 16,790 |
+| Registration reverse-ETL events | 67,302 |
+| Purchase reverse-ETL events in the 90-day output window | 10,115 |
+
+All payment reconciliation, uniqueness, required-field, and payment-occurrence assertions pass.
+
+An independent recomputation produced:
+
+- zero registration event-ID mismatches;
+- zero Purchase event-ID mismatches;
+- zero disallowed renewal or later-installment rows in the Purchase output.
+
+The 13 `mentorship_balance` rows remain `is_repeat_payment = TRUE` in `mart_payments` and are not counted as server-side Order Completed events. They are intentionally included as `Purchase` only in the warehouse reverse-ETL output because the later `WAREHOUSE_CONVERSION_EVENT_SPEC.md` explicitly identifies the one-time final balance as a platform Purchase conversion.
+
+All 507 client-side payment records remain explicitly unconfirmed. The 494 historical Kajabi rows and 13 native browser Order Completed rows therefore cannot be mistaken for server-confirmed Stripe revenue.
+
+## Clarification round 6 — 2026-07-23
+
+The owner confirmed that the ActiveCampaign `Registered` tags—not the later
+`RFC START`/`START` tags—represent server-side form submissions.
+
+The configured registration tags are now:
+
+| Tag ID | Tag name | Live submission rows |
+|---|---|---:|
+| `140` | `[CW] Registered for Webinar` | 51,138 |
+| `415` | `[KRC] Registered for Challenge - 05/26/25` | 8,261 |
+| `676` | `[KRC] Registered - 07/20/26` | 8,097 |
+
+Total server-side ActiveCampaign form submissions: **67,496** across **67,302**
+distinct contacts.
+
+The dated July 2026 assignment sequence confirmed the distinction:
+
+- `[KRC] Registered - 07/20/26` has 8,097 assignments.
+- `[KRC] RFC START - 07/20/26` has only 415 assignments.
+- 374 of those 415 received the dated `Registered` tag first.
+- The median delay from the dated `Registered` tag to `RFC START` is about 11 minutes.
+
+The server-side form mart, identity outputs, customer mart, attribution models,
+landing-page outputs, and registration reverse-ETL table were rebuilt from the
+corrected tags. All affected uniqueness and required-field assertions pass.
+
+## Clarification round 7 — 2026-07-24
+
+The owner approved separating challenge and webinar registrations with one
+canonical `registration_type` shared by browser and warehouse events.
+
+### Registration mapping
+
+| Registration type | ActiveCampaign form ID | Server-side tag rules |
+|---|---:|---|
+| `krc` | `20` | Primary: tags beginning `[KRC] Registered for Challenge -` or `[KRC] Registered -`; fallback: exact tag `[KRC] Registered for Challenge` only when the contact has no primary KRC registration tag |
+| `webinar` | `15` | Primary: exact tag `[CW] Registered for Webinar`; no fallback |
+
+The browser reads the hidden ActiveCampaign `f`/`u` field. It does not infer the
+registration type from the page URL.
+
+The shared browser/server event ID is:
+
+```text
+form_submission_<sha256(lowercase_email|registration_type|Pacific_date)>
+```
+
+First conversions are selected per `profile_id + registration_type`, so a KRC
+registration cannot suppress the same person's webinar registration.
+
+### Live deployment and validation
+
+- The browser tracking bundle was published to the existing R2 object
+  `assets/cf-sh-seg`.
+- A production fetch confirmed that the served asset contains both registration
+  mappings and the new payload fields.
+- The affected Dataform graph was rebuilt in
+  `able-folio-499722.booming_data_analytics`.
+- Every affected form and reverse-ETL uniqueness/required-field assertion passed.
+- Stripe inputs and downstream outputs were refreshed after a sync-timing
+  mismatch; all payment reconciliation and occurrence assertions passed.
+
+| Live output | Registration type | Rows |
+|---|---|---:|
+| Server form mart, primary | `krc` | 845,372 |
+| Server form mart, fallback | `krc` | 3,480 |
+| Server form mart | `webinar` | 51,138 |
+| Registration reverse ETL | `krc` | 756,988 |
+| Registration reverse ETL | `webinar` | 51,138 |
+
+All 899,990 server-side registration rows have a canonical event ID.

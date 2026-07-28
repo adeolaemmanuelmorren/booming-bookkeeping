@@ -1,0 +1,184 @@
+config {
+  type: "table",
+  description: "Client- and server-side conversion events joined to every earlier resolved website touchpoint.",
+  tags: ["output", "attribution", "conversions"],
+  bigquery: {
+    clusterBy: ["conversion_source", "conversion_type", "profile_id"],
+  },
+}
+
+js {
+  const { dropPartitionedTableOnce } = require("includes/table_migrations");
+}
+
+pre_operations {
+  ${dropPartitionedTableOnce(self())}
+}
+
+
+with server_form_events as (
+  select
+    concat('server_form:', form_submission_id) as conversion_id,
+    profile_id,
+    submitted_at as conversion_time,
+    'server_side' as conversion_source,
+    'form_submission' as conversion_type,
+    1.0 as form_submissions_server_side,
+    0.0 as form_submissions_client_side,
+    0.0 as order_completed_server_side,
+    0.0 as order_completed_client_side,
+    0.0 as payments_server_side,
+    0.0 as payments_client_side,
+    0.0 as revenue_server_side,
+    0.0 as revenue_client_side,
+    0.0 as customers_server_side
+  from ${ref("mart_form_submissions_server_side")}
+  where submitted_at is not null
+),
+
+client_form_events as (
+  select
+    concat('client_form:', form_submission_id) as conversion_id,
+    profile_id,
+    submitted_at as conversion_time,
+    'client_side' as conversion_source,
+    if(is_checkout_form, 'checkout_form_submission', 'form_submission') as conversion_type,
+    0.0 as form_submissions_server_side,
+    1.0 as form_submissions_client_side,
+    0.0 as order_completed_server_side,
+    0.0 as order_completed_client_side,
+    0.0 as payments_server_side,
+    0.0 as payments_client_side,
+    0.0 as revenue_server_side,
+    0.0 as revenue_client_side,
+    0.0 as customers_server_side
+  from ${ref("mart_form_submissions_client_side")}
+  where submitted_at is not null
+),
+
+server_payments_ranked as (
+  select
+    *,
+    row_number() over (
+      partition by coalesce(profile_id, concat(payment_source, ':customer:', customer_id), concat(payment_source, ':payment:', payment_id))
+      order by payment_time, payment_id
+    ) as customer_payment_number
+  from ${ref("mart_payments")}
+  where payment_time is not null
+),
+
+server_payment_events as (
+  select
+    concat('server_payment:', payment_source, ':', payment_id) as conversion_id,
+    profile_id,
+    payment_time as conversion_time,
+    'server_side' as conversion_source,
+    if(is_repeat_payment, 'repeat_payment', 'order_completed') as conversion_type,
+    0.0 as form_submissions_server_side,
+    0.0 as form_submissions_client_side,
+    if(is_repeat_payment, 0.0, 1.0) as order_completed_server_side,
+    0.0 as order_completed_client_side,
+    1.0 as payments_server_side,
+    0.0 as payments_client_side,
+    cast(net_amount as float64) as revenue_server_side,
+    0.0 as revenue_client_side,
+    if(customer_payment_number = 1, 1.0, 0.0) as customers_server_side
+  from server_payments_ranked
+),
+
+client_payment_events as (
+  select
+    concat('client_payment:', client_payment_id) as conversion_id,
+    profile_id,
+    payment_time as conversion_time,
+    'client_side' as conversion_source,
+    'order_completed' as conversion_type,
+    0.0 as form_submissions_server_side,
+    0.0 as form_submissions_client_side,
+    0.0 as order_completed_server_side,
+    1.0 as order_completed_client_side,
+    0.0 as payments_server_side,
+    1.0 as payments_client_side,
+    0.0 as revenue_server_side,
+    cast(coalesce(amount, 0) as float64) as revenue_client_side,
+    0.0 as customers_server_side
+  from ${ref("mart_payments_client_side")}
+  where payment_time is not null
+),
+
+conversion_events as (
+  select * from server_form_events
+  union all
+  select * from client_form_events
+  union all
+  select * from server_payment_events
+  union all
+  select * from client_payment_events
+),
+
+ad_names as (
+  select
+    source,
+    campaign_id,
+    adset_id,
+    ad_id,
+    array_agg(campaign_name ignore nulls order by time desc limit 1)[safe_offset(0)] as campaign_name,
+    array_agg(adset_name ignore nulls order by time desc limit 1)[safe_offset(0)] as adset_name,
+    array_agg(ad_name ignore nulls order by time desc limit 1)[safe_offset(0)] as ad_name
+  from ${ref("mart_ad_performance")}
+  group by source, campaign_id, adset_id, ad_id
+),
+
+joined as (
+  select
+    events.*,
+    touchpoints.touchpoint_id,
+    touchpoints.session_id,
+    touchpoints.session_start_timestamp,
+    touchpoints.first_page_host as landing_page_host,
+    touchpoints.first_page_path as landing_page_path,
+    coalesce(touchpoints.utm_source, touchpoints.channel_source, 'offline') as source,
+    coalesce(touchpoints.utm_medium, touchpoints.channel_medium, 'offline') as medium,
+    touchpoints.utm_campaign,
+    touchpoints.utm_content,
+    touchpoints.utm_term,
+    touchpoints.campaign_id,
+    touchpoints.adset_id,
+    touchpoints.ad_id,
+    coalesce(ad_names.campaign_name, touchpoints.utm_campaign, 'unknown') as campaign_name,
+    coalesce(ad_names.adset_name, 'unknown') as adset_name,
+    coalesce(ad_names.ad_name, 'unknown') as ad_name
+  from conversion_events events
+  left join ${ref("mart_touchpoints_all")} touchpoints
+    on touchpoints.profile_id = events.profile_id
+   and touchpoints.touchpoint_time <= events.conversion_time
+  left join ad_names
+    on ad_names.source = touchpoints.utm_source
+   and ad_names.campaign_id is not distinct from touchpoints.campaign_id
+   and ad_names.adset_id is not distinct from touchpoints.adset_id
+   and ad_names.ad_id is not distinct from touchpoints.ad_id
+),
+
+ranked as (
+  select
+    *,
+    count(*) over (partition by conversion_id) as total_touchpoints,
+    row_number() over (
+      partition by conversion_id
+      order by coalesce(session_start_timestamp, conversion_time), touchpoint_id
+    ) as touchpoint_number
+  from joined
+)
+
+select
+  *,
+  case
+    when total_touchpoints = 1 then 1.0
+    when total_touchpoints = 2 then 0.5
+    when touchpoint_number = 1 then 0.4
+    when touchpoint_number = total_touchpoints then 0.4
+    else 0.2 / (total_touchpoints - 2)
+  end as multi_touch_weight,
+  if(touchpoint_number = 1, 1.0, 0.0) as first_touch_weight,
+  if(touchpoint_number = total_touchpoints, 1.0, 0.0) as last_touch_weight
+from ranked

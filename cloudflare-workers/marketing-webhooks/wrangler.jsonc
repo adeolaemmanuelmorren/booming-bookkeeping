@@ -28,6 +28,22 @@
 		},
 	],
 
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "REVERSE_ETL_DEBUG_STORE",
+				"class_name": "ReverseEtlDebugStore",
+			},
+		],
+	},
+
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["ReverseEtlDebugStore"],
+		},
+	],
+
 	"queues": {
 		"producers": [
 			{
@@ -60,7 +76,6 @@
 	 *   wrangler secret put SEGMENT_WRITE_KEY
 	 *   wrangler secret put ACTIVE_CAMPAIGN_API_URL
 	 *   wrangler secret put ACTIVE_CAMPAIGN_API_TOKEN
-	 *   wrangler secret put ACTIVE_CAMPAIGN_WEBHOOK_SECRET
 	 *   wrangler secret put SHOPIFY_STORE_DOMAIN
 	 *   wrangler secret put SHOPIFY_CLIENT_ID
 	 *   wrangler secret put SHOPIFY_CLIENT_SECRET

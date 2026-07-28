@@ -58,7 +58,7 @@ Permanent failure
 
 - `POST /webhook/shopify` ingests Shopify webhooks. Topic is read from `X-Shopify-Topic`.
 - `POST /webhook/webflow` ingests Webflow webhook payloads. Topic is read from `payload.triggerType`.
-- `POST /webhook/activecampaign` ingests ActiveCampaign form-encoded webhooks after custom-header authentication. Topic is read from the `type` POST field.
+- `POST /webhook/activecampaign` ingests ActiveCampaign form-encoded webhooks. Topic is read from the `type` POST field.
 - `POST /webhook` is the legacy Shopify-only endpoint.
 - `GET /health` and `GET /` return health and registered sources.
 - `GET /admin/dlq` lists failed messages persisted to KV.
@@ -134,15 +134,12 @@ Required secrets:
 wrangler secret put SEGMENT_WRITE_KEY
 wrangler secret put ACTIVE_CAMPAIGN_API_URL
 wrangler secret put ACTIVE_CAMPAIGN_API_TOKEN
-wrangler secret put ACTIVE_CAMPAIGN_WEBHOOK_SECRET
 wrangler secret put SHOPIFY_STORE_DOMAIN
 wrangler secret put SHOPIFY_CLIENT_ID
 wrangler secret put SHOPIFY_CLIENT_SECRET
 ```
 
 `ACTIVE_CAMPAIGN_API_URL` is the account API URL shown under ActiveCampaign Settings -> Developer. `ACTIVE_CAMPAIGN_API_TOKEN` is sent only in the server-side `Api-Token` header. The API lookup runs after queue ingestion, not in the webhook response path.
-
-Configure the same `ACTIVE_CAMPAIGN_WEBHOOK_SECRET` value on the ActiveCampaign webhook as a standard custom header named `X-ActiveCampaign-Webhook-Secret`. The deployed endpoint fails closed with `401` when the Worker secret or matching header is missing. Localhost bypasses this check for local development.
 
 The Shopify enricher uses the client credentials grant to request a short-lived
 Admin API access token from Shopify, then sends that token in the

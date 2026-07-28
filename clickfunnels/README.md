@@ -4,7 +4,9 @@
 
 This folder contains browser helper snippets for ClickFunnels pages in the Boom Bookkeeping funnel.
 
-The helper is separate from the Segment loader. Segment should load through the matching first-party proxy host, while this helper can be hosted from the matching R2 asset domain.
+The helper loads Jitsu through the matching first-party Worker host and can be hosted from the matching R2 asset domain.
+
+The capture trigger, conversion coverage, event-ID rules, and browser/server deduplication contract are documented in [`../CLICKFUNNELS_CLIENT_SIDE_FORM_AND_PAYMENT_CAPTURE.md`](../CLICKFUNNELS_CLIENT_SIDE_FORM_AND_PAYMENT_CAPTURE.md).
 
 ## Folder Structure
 
@@ -30,11 +32,14 @@ Supporting behavior is split across small files in `clickfunnels/src/`:
 config.js
 cookies.js
 attribution.js
-segment-user.js
-segment-track.js
+analytics-client.js
+analytics-track.js
+jitsu-loader.js
 datalayer.js
 forms.js
 identity.js
+checkout-context.js
+purchase-confirmation.js
 ```
 
 The build script bundles the JS modules and writes:

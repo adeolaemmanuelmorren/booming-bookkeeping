@@ -1,4 +1,4 @@
-import { sendIdentify } from "./segment-track.js";
+import { sendIdentify } from "./analytics-track.js";
 
 var EMAIL_SELECTORS = ['input[type="email"]', 'input[name="email"]', 'input[name="Email"]', 'input[name="email_address"]', 'input[name="emailAddress"]'];
 var PHONE_SELECTORS = ['input[type="tel"]', 'input[type="phone"]', 'input[name="phone"]', 'input[name="Phone"]', 'input[name="mobile"]', 'input[name="phone_number"]', 'input[name="phoneNumber"]'];
@@ -88,6 +88,34 @@ export function identifyFromForm(form) {
   if (phoneInput) {
     identifyFromInput(phoneInput, "phone");
   }
+}
+
+export function identifyFromProperties(properties) {
+  var email = String(properties && properties.email || "").trim();
+  var phone = normalizePhone(properties && properties.phone);
+  var traits = {};
+
+  if (isValidEmail(email)) {
+    traits.email = email;
+  }
+  if (isValidPhone(phone)) {
+    traits.phone = phone;
+  }
+  if (properties && properties.name) {
+    traits.name = properties.name;
+  }
+  if (properties && properties.first_name) {
+    traits.first_name = properties.first_name;
+  }
+  if (properties && properties.last_name) {
+    traits.last_name = properties.last_name;
+  }
+
+  if (!traits.email && !traits.phone) {
+    return;
+  }
+
+  sendIdentify(traits.email || "", traits);
 }
 
 export function bindIdentifyInputs(root) {

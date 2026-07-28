@@ -95,9 +95,6 @@ export interface MarketingSource<TEnrichment = EnrichmentResult> {
 	 */
 	parsePayload?(request: Request): Promise<unknown>;
 
-	/** Verify a provider signature or shared secret before parsing the payload. */
-	verifyRequest?(request: Request): boolean | Promise<boolean>;
-
 	/**
 	 * Map of topic → handler
 	 * Topic is the webhook event type (e.g., 'checkouts/create', 'orders/paid')

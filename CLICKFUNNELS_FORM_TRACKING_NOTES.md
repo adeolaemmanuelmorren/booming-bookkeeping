@@ -1,5 +1,14 @@
 # ClickFunnels Form Tracking Notes
 
+## Deployment Changelog
+
+### 2026-07-26 19:35 HST
+
+- ActiveCampaign and ClickFunnels anonymous-ID field hydration now waits until Jitsu is fully initialized.
+- This prevents a pre-initialization `__eventn_id` cookie value from being written into form fields.
+- Form submission capture, purchase tracking, and cross-domain tracking were not changed.
+- Published to `assets/cf-sh-seg` and verified byte-for-byte on all four asset domains.
+
 ## Goal
 
 Track ClickFunnels Classic lead forms and checkout pages without requiring manually added data attributes.
@@ -79,7 +88,11 @@ Checkout submissions emit:
 Order Completed
 ```
 
-The event is emitted from the checkout form's submit event. Its properties explicitly record:
+ClickFunnels events are emitted from the form's passive `formdata` event. Unlike the ordinary `submit` event, `formdata` still fires when ClickFunnels calls native `form.submit()`. The listener reads the finalized payload without cancelling, changing, or delaying the form submission.
+
+Kajabi keeps its existing working submit-event path.
+
+Checkout properties explicitly record:
 
 ```text
 completion_basis = checkout_form_submission
@@ -87,9 +100,9 @@ is_payment_confirmed = false
 payment_status = submitted_unconfirmed
 ```
 
-The checkout context is also stored in `sessionStorage` for same-tab follow-up context. A checkout-form submission does not prove that the payment processor accepted the payment; server-side Stripe remains the authoritative source for confirmed payments.
+A checkout-form submission does not prove that the payment processor accepted the payment; server-side Stripe remains the authoritative source for confirmed payments.
 
-Kajabi's `new_checkout_offer` form uses the same event path. It no longer falls through to `Form Submitted`.
+Kajabi's `new_checkout_offer` form keeps its existing submit-event path and still emits `Order Completed`; it does not fall through to `Form Submitted`.
 
 ## Product Detection
 
@@ -111,7 +124,7 @@ For Kajabi, it reads the offer ID from the checkout page class and reads the pro
 
 ## Identity
 
-Valid email values are identified on email-field blur/change and again during form submit. The submit-time call covers autofill and users who submit without leaving the email field. Repeated identification of the same value on the same input is suppressed.
+Valid email values are identified on email-field blur/change and again from the finalized `formdata` payload. The formdata-time call covers autofill and users who submit without leaving the email field. Kajabi retains its existing submit-time identify call. Repeated identification of the same value on the same input is suppressed; the final submission deliberately emits an identify event with the complete available email, phone, and name traits.
 
 Safe payment reconciliation identifiers are retained in checkout events, including Stripe PaymentIntent/PaymentMethod IDs and PayPal payer/payment/order IDs. Credentials and authorization material such as card data, authorization tokens, client secrets, passwords, and nonces are excluded.
 

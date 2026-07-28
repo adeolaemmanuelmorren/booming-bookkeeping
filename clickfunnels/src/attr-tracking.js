@@ -1,6 +1,7 @@
+import { waitForAnalytics } from "./analytics-client.js";
+import { sendTrack } from "./analytics-track.js";
 import { getAttrEventProperties, writeLocalAttributionMirror } from "./attribution.js";
 import { logClickFunnels } from "./logger.js";
-import { waitForSegment } from "./segment-user.js";
 import { stableStringify } from "./utils.js";
 
 var sentAttrEventSignatures = {};
@@ -30,22 +31,18 @@ function shouldTrackAttr() {
 function trackAttr() {
   writeLocalAttributionMirror("before attr track");
 
-  if (!window.analytics || typeof window.analytics.track !== "function") {
-    logClickFunnels("attr track skipped; analytics.track missing", {});
-    return;
-  }
   if (!shouldTrackAttr()) {
     return;
   }
 
   logClickFunnels("attr track sent", { properties: getAttrEventProperties() });
-  window.analytics.track("attr", getAttrEventProperties());
+  sendTrack("attr", getAttrEventProperties());
 }
 
 export function scheduleAttrTracking() {
   var delays = [0, 250, 750, 1500, 3e3, 5e3, 8e3, 12e3];
 
-  waitForSegment(function() {
+  waitForAnalytics(function() {
     delays.forEach(function(delay) {
       window.setTimeout(trackAttr, delay);
     });

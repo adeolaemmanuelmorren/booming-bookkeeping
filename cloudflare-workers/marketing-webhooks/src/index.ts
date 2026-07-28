@@ -18,6 +18,9 @@ import { firstOf, generateUUID, headersToObject } from "./utils";
 import { getSource, hasSource, getSourceNames, defaultExtractTopic } from "./sources";
 import { processBatch } from "./consumers/processor";
 import { handleDLQ, listFailedMessages, replayFailedMessage } from "./consumers/dlq-handler";
+import { handleDebugWebhook } from "./handlers/debug-webhook";
+
+export { ReverseEtlDebugStore } from "./durable-objects/reverse-etl-debug-store";
 
 // =============================================================================
 // HTTP INGESTION HANDLER
@@ -136,13 +139,6 @@ async function handleWebhook(request: Request): Promise<Response> {
 	const sourceHandler = getSource(source);
 	if (!sourceHandler) {
 		return jsonResponse({ error: `Source not found: ${source}` }, 500);
-	}
-
-	if (sourceHandler.verifyRequest) {
-		const isVerified = await sourceHandler.verifyRequest(request);
-		if (!isVerified) {
-			return jsonResponse({ error: "Unauthorized webhook" }, 401);
-		}
 	}
 
 	// Parse payload
@@ -398,9 +394,14 @@ export default {
 					"Access-Control-Allow-Origin": "*",
 					"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 					"Access-Control-Allow-Headers":
-						"Authorization, Content-Type, X-ActiveCampaign-Webhook-Secret, X-Shopify-Topic, X-Shopify-HMAC-SHA256",
+						"Authorization, Content-Type, X-Shopify-Topic, X-Shopify-HMAC-SHA256",
 				},
 			});
+		}
+
+		// Reverse ETL debug endpoints only log the posted properties.
+		if (url.pathname.startsWith("/webhook/debug/")) {
+			return handleDebugWebhook(request, env as unknown as MarketingWebhookEnv);
 		}
 
 		// Webhook ingestion

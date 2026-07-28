@@ -3,10 +3,18 @@ config {
   description: "Stripe payments labeled as one-time, initial, renewal, installment, or balance with repeat-payment flags.",
   tags: ["intermediate", "stripe", "payments"],
   bigquery: {
-    partitionBy: "DATE(payment_time)",
     clusterBy: ["customer_id", "subscription_id", "is_repeat_payment"],
   },
 }
+
+js {
+  const { dropPartitionedTableOnce } = require("includes/table_migrations");
+}
+
+pre_operations {
+  ${dropPartitionedTableOnce(self())}
+}
+
 
 with sequenced as (
   select
@@ -26,11 +34,13 @@ select
   case
     when product_rule = 'mentorship_balance' then 'balance'
     when subscription_id is null then 'one_time'
-    when payment_sequence_number = 1 then 'initial'
+    when invoice_billing_reason = 'subscription_create' then 'initial'
     when product_rule = 'mentorship_3x1997' then 'installment'
     else 'renewal'
   end as payment_occurrence_type,
   product_rule = 'mentorship_balance'
-    or coalesce(payment_sequence_number > 1, false) as is_repeat_payment
+    or (
+      subscription_id is not null
+      and coalesce(invoice_billing_reason != 'subscription_create', true)
+    ) as is_repeat_payment
 from sequenced
-

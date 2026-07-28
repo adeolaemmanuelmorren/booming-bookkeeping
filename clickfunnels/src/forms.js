@@ -1,12 +1,20 @@
-import { ATTR_EVENT_COOKIE_FIELDS, CONFIG, COOKIE_FIELDS, URL_FIELDS } from "./config.js";
-import { getConfiguredActiveCampaignFieldNames, hydrateActiveCampaignForms } from "./active-campaign.js";
-import { identifyFromForm } from "./identity.js";
-import { createEventId, getSegmentAnonymousId } from "./segment-user.js";
-import { sendTrack } from "./segment-track.js";
+import { ATTR_EVENT_COOKIE_FIELDS, COOKIE_FIELDS, URL_FIELDS } from "./config.js";
+import { getAnonymousId } from "./analytics-client.js";
+import { sendTrack } from "./analytics-track.js";
+import { getConfiguredActiveCampaignFieldNames } from "./active-campaign.js";
+import { loadCheckoutContext, saveCheckoutContext } from "./checkout-context.js";
+import {
+  createFormSubmissionEventId,
+  getPacificEventDate,
+} from "./event-ids.js";
+import { identifyFromProperties } from "./identity.js";
+import { registerPurchaseAttempt } from "./purchase-confirmation.js";
+import { getActiveCampaignFormId, getRegistrationForm } from "./registration-forms.js";
+import { createSubmissionBurstGuard } from "./submission-burst.js";
 import { mergeObjects } from "./utils.js";
 
-var PENDING_CHECKOUT_KEY = "boom_clickfunnels_pending_checkout";
 var trackedSubmissionIds = {};
+var shouldProcessFormDataSubmission = createSubmissionBurstGuard(1000);
 
 function runSafely(callback) {
   try {
@@ -26,6 +34,32 @@ function cssEscape(value) {
 
 function isFormElement(node) {
   return Boolean(node) && node.nodeType === Node.ELEMENT_NODE && String(node.tagName || "").toLowerCase() === "form";
+}
+
+function isFacebookTrackingTransportForm(form) {
+  var action;
+  var actionUrl;
+
+  if (!isFormElement(form)) {
+    return false;
+  }
+
+  action = form.getAttribute("action") || "";
+  if (!action) {
+    return false;
+  }
+
+  try {
+    actionUrl = new URL(action, window.location.href);
+  } catch (error) {
+    return false;
+  }
+
+  if (actionUrl.hostname !== "facebook.com" && actionUrl.hostname.slice(-13) !== ".facebook.com") {
+    return false;
+  }
+
+  return actionUrl.pathname === "/tr" || actionUrl.pathname.indexOf("/tr/") === 0;
 }
 
 function getFieldValue(value) {
@@ -89,6 +123,7 @@ function getTrackingFieldNames() {
     attribution_last: true,
     attribution_current: true,
     custom_type: true,
+    purchase_payment_intent_id: true,
   };
 
   URL_FIELDS.forEach(function(name) {
@@ -154,6 +189,20 @@ function appendSubmittedField(fields, name, value) {
   fields[name].push(value);
 }
 
+function captureSubmittedFormData(output, name, value) {
+  name = String(name || "").trim();
+  value = getFieldValue(value).trim();
+
+  if (!name) {
+    return;
+  }
+  if (!value) {
+    return;
+  }
+
+  appendSubmittedField(output.submittedFields, name, value);
+}
+
 function addFieldToProperties(output, name, value, options) {
   var normalizedName = normalizeFormFieldName(name);
   var topLevelName;
@@ -189,25 +238,59 @@ function addFieldToProperties(output, name, value, options) {
   appendSubmittedField(output.extraFields, normalizedName, value);
 }
 
-function getFormFieldProperties(form, submitter) {
-  var output = { topLevelFields: {}, extraFields: {} };
+function getFormFieldProperties(form, submitter, submittedFormData) {
+  var output = {
+    topLevelFields: {},
+    extraFields: {},
+    submittedFields: {},
+  };
   var passwordNames = getPasswordFieldNames(form);
   var trackingNames = getTrackingFieldNames();
-  var formData;
+  var formData = submittedFormData;
 
-  try {
-    formData = submitter ? new FormData(form, submitter) : new FormData(form);
-  } catch (error) {
-    formData = new FormData(form);
+  if (!formData) {
+    try {
+      formData = submitter ? new FormData(form, submitter) : new FormData(form);
+    } catch (error) {
+      formData = new FormData(form);
+    }
   }
 
   formData.forEach(function(value, name) {
+    captureSubmittedFormData(output, name, value);
     addFieldToProperties(output, name, value, { passwordNames, trackingNames });
   });
 
   mergeVisibleClickFunnelsFieldProperties(output, form);
 
   return output;
+}
+
+function getFormDataString(formData, name) {
+  var value;
+
+  if (!formData || typeof formData.get !== "function") {
+    return "";
+  }
+
+  value = formData.get(name);
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.trim();
+}
+
+export function getPaymentMethodId(formData) {
+  var paymentMethodId = getFormDataString(formData, "purchase[stripe_customer_token]") ||
+    getFormDataString(formData, "purchase[payment_method_id]") ||
+    getFormDataString(formData, "checkout_offer[payment_method_id]");
+
+  if (!/^pm_[A-Za-z0-9]+$/.test(paymentMethodId)) {
+    return "";
+  }
+
+  return paymentMethodId;
 }
 
 function isVisibleElement(element) {
@@ -261,38 +344,12 @@ function mergeVisibleClickFunnelsFieldProperties(output, form) {
   });
 }
 
-function getSubmitter(event, form) {
-  var activeElement;
-  var tagName;
-  var type;
-
-  if (event && event.submitter) {
-    return event.submitter;
-  }
-
-  activeElement = document.activeElement;
-  if (!activeElement || !form.contains(activeElement)) {
-    return null;
-  }
-
-  tagName = String(activeElement.tagName || "").toLowerCase();
-  type = String(activeElement.type || "").toLowerCase();
-  if (tagName === "button") {
-    return activeElement;
-  }
-  if (tagName === "input" && (type === "submit" || type === "image")) {
-    return activeElement;
-  }
-
-  return null;
-}
-
 function buildFormSubmissionId(form, submittedAt) {
   var formId = form.getAttribute("id") || "";
   var formName = form.getAttribute("name") || form.getAttribute("data-name") || formId || "";
 
   return [
-    getSegmentAnonymousId() || "anon",
+    getAnonymousId() || "anon",
     formId,
     formName,
     window.location.pathname || "",
@@ -312,27 +369,39 @@ function getPageFallbackContext() {
   };
 }
 
-function buildFormSubmittedProperties(form, submitter, trigger) {
+function buildFormSubmittedProperties(form, submitter, trigger, submittedFormData) {
   var submittedAt = new Date().toISOString();
-  var formSubmissionId = getFormSubmissionId(form, submittedAt);
   var formId = form.getAttribute("id") || "";
   var formName = form.getAttribute("name") || form.getAttribute("data-name") || formId || "";
   var formAction = form.getAttribute("action") || "";
   var formMethod = String(form.getAttribute("method") || "get").toUpperCase();
-  var formFields = getFormFieldProperties(form, submitter);
-  var eventId = createEventId("Form Submitted", formSubmissionId);
+  var formFields = getFormFieldProperties(form, submitter, submittedFormData);
+  var registrationForm = getRegistrationForm(form);
+  var registrationType = registrationForm
+    ? registrationForm.registrationType
+    : "general";
+  var eventId = createFormSubmissionEventId({
+    email: formFields.topLevelFields.email,
+    registrationType: registrationType,
+    submissionDate: getPacificEventDate(submittedAt),
+  });
 
   return mergeObjects({
+    active_campaign_form_id: getActiveCampaignFormId(form),
+    content_name: registrationForm ? registrationForm.contentName : "",
+    event_id: eventId,
     form_name: formName,
     form_id: formId,
     form_action: formAction,
     form_method: formMethod,
+    lead_source: registrationForm ? registrationType : "",
     submitted_at: submittedAt,
     submit_trigger: trigger || "submit",
     extra_submitted_fields: formFields.extraFields,
+    submitted_form_data: JSON.stringify(formFields.submittedFields),
     submitter_name: submitter && submitter.name || "",
     submitter_value: submitter && submitter.value || "",
-    event_id: eventId,
+    registration_type: registrationForm ? registrationType : "",
   }, mergeObjects(getPageFallbackContext(), formFields.topLevelFields));
 }
 
@@ -346,23 +415,6 @@ function shouldTrackSubmission(properties) {
 
   trackedSubmissionIds[properties.event_id] = true;
   return true;
-}
-
-function hasLeadIdentity(properties) {
-  if (properties.email) {
-    return true;
-  }
-  if (properties.phone) {
-    return true;
-  }
-  if (properties.name) {
-    return true;
-  }
-  if (properties.first_name) {
-    return true;
-  }
-
-  return false;
 }
 
 function getDataAttribute(element, name) {
@@ -458,28 +510,8 @@ function isKajabiCheckoutForm(form) {
   return Boolean(form.querySelector('[name^="checkout_offer["]'));
 }
 
-function getKajabiCheckoutProduct(form) {
-  var bodyClass = document.body && document.body.className || "";
-  var offerIdMatch = bodyClass.match(/offer-checkout-offer-([0-9]+)/);
-  var titleElement = form.querySelector(".checkout-content-title");
-  var priceElement = form.querySelector(".js-checkout-panel-price-discountable");
-
-  return {
-    product_id: offerIdMatch && offerIdMatch[1] || "",
-    product_name: titleElement && titleElement.textContent.trim() || "",
-    price: parseMoneyAmount(priceElement && priceElement.textContent),
-    currency: "USD",
-  };
-}
-
-function getCheckoutProducts(form) {
-  var products = getSelectedCheckoutProducts();
-
-  if (isKajabiCheckoutForm(form)) {
-    products.push(getKajabiCheckoutProduct(form));
-  }
-
-  return dedupeProducts(products);
+export function isOneClickUpsellSubmission(formData) {
+  return getFormDataString(formData, "upsell") === "1";
 }
 
 function hasPaymentFields(form) {
@@ -517,193 +549,124 @@ function isPaymentSubmission(form) {
   return false;
 }
 
-function buildPendingCheckoutProperties(form, submitter, trigger) {
-  var submittedAt = new Date().toISOString();
-  var submissionId = getFormSubmissionId(form, submittedAt);
-  var products = getCheckoutProducts(form);
-  var firstProduct = products[0] || {};
-  var eventId = createEventId("Order Completed", submissionId);
-  var formFields = getFormFieldProperties(form, submitter);
+function fillMissingCheckoutIdentity(fields, checkoutContext) {
+  ["email", "name", "first_name", "last_name", "phone"].forEach(function(fieldName) {
+    if (fields[fieldName]) {
+      return;
+    }
+    if (!checkoutContext || !checkoutContext[fieldName]) {
+      return;
+    }
 
-  return mergeObjects({
-    order_id: submissionId,
-    checkout_id: submissionId,
-    checkout_submission_id: submissionId,
-    event_id: eventId,
-    completion_basis: "checkout_form_submission",
-    is_payment_confirmed: false,
-    payment_status: "submitted_unconfirmed",
-    form_id: form.getAttribute("id") || "",
-    form_name: form.getAttribute("name") || form.getAttribute("data-name") || "",
-    form_action: form.getAttribute("action") || "",
-    form_method: String(form.getAttribute("method") || "get").toUpperCase(),
-    submitted_at: submittedAt,
-    submit_trigger: trigger || "submit",
-    products: products,
-    product_id: firstProduct.product_id || "",
-    product_name: firstProduct.product_name || "",
-    value: firstProduct.price || null,
-    currency: firstProduct.currency || "USD",
-    anonymous_id: getSegmentAnonymousId(),
-    page_url: window.location.href,
-    page_path: window.location.pathname || "",
-    page_title: document.title || "",
-    extra_submitted_fields: formFields.extraFields,
-  }, formFields.topLevelFields);
-}
-
-function storePendingCheckout(form, submitter, trigger) {
-  var properties = buildPendingCheckoutProperties(form, submitter, trigger);
-
-  try {
-    window.sessionStorage.setItem(PENDING_CHECKOUT_KEY, JSON.stringify(properties));
-  } catch (error) {
-    window.__boomClickFunnelsPendingCheckout = properties;
-  }
-
-  return properties;
-}
-
-function getPendingCheckout() {
-  try {
-    return JSON.parse(window.sessionStorage.getItem(PENDING_CHECKOUT_KEY) || "null");
-  } catch (error) {
-    return window.__boomClickFunnelsPendingCheckout || null;
-  }
-}
-
-function clearPendingCheckout() {
-  try {
-    window.sessionStorage.removeItem(PENDING_CHECKOUT_KEY);
-  } catch (error) {
-    window.__boomClickFunnelsPendingCheckout = null;
-  }
-}
-
-function trackLeadFormSubmission(form, submitter, trigger) {
-  var properties = buildFormSubmittedProperties(form, submitter, trigger);
-
-  if (trigger !== "submit" && !hasLeadIdentity(properties)) {
-    return properties;
-  }
-
-  if (!shouldTrackSubmission(properties)) {
-    return properties;
-  }
-
-  runSafely(function() {
-    sendTrack("Form Submitted", properties);
+    fields[fieldName] = checkoutContext[fieldName];
   });
+}
+
+function buildPurchaseAttemptProperties(form, submitter, submittedFormData) {
+  var submittedAt = new Date().toISOString();
+  var paymentMethodId = getPaymentMethodId(submittedFormData);
+  var isOneClickUpsell = isOneClickUpsellSubmission(submittedFormData);
+  var checkoutContext = isOneClickUpsell ? loadCheckoutContext() : null;
+  var formFields = getFormFieldProperties(form, submitter, submittedFormData);
+  var properties;
+
+  fillMissingCheckoutIdentity(formFields.topLevelFields, checkoutContext);
+  if (!paymentMethodId && checkoutContext) {
+    paymentMethodId = checkoutContext.payment_method_id || "";
+  }
+
+  properties = mergeObjects({
+    payment_method_id: paymentMethodId,
+    submitted_at: submittedAt,
+    anonymous_id: getAnonymousId(),
+  }, formFields.topLevelFields);
+
+  if (!isOneClickUpsell) {
+    saveCheckoutContext(properties);
+  }
+
   return properties;
 }
 
-function handleFormSubmit(event) {
+function handleTrackedFormData(event) {
   runSafely(function() {
-    var form = event.target;
+    var form = event.currentTarget || event.target;
     var properties;
-    var submitter;
 
     if (!isFormElement(form)) {
       return;
     }
-
-    hydrateActiveCampaignForms();
-    submitter = getSubmitter(event, form);
-    identifyFromForm(form);
+    if (isFacebookTrackingTransportForm(form)) {
+      return;
+    }
 
     if (isPaymentSubmission(form)) {
-      properties = storePendingCheckout(form, submitter, "submit");
-      if (shouldTrackSubmission(properties)) {
-        sendTrack("Order Completed", properties);
+      properties = buildPurchaseAttemptProperties(form, null, event.formData);
+      identifyFromProperties(properties);
+      if (!shouldProcessFormDataSubmission(form, "Purchase Attempt", properties)) {
+        return;
       }
+      void registerPurchaseAttempt(properties);
       return;
     }
 
-    trackLeadFormSubmission(form, submitter, "submit");
-  });
-}
-
-function isSubmitFormLink(element) {
-  var link = element && element.closest && element.closest('a[href="#submit-form"], button, input[type="submit"]');
-
-  if (!link) {
-    return false;
-  }
-  if (link.matches('a[href="#submit-form"]')) {
-    return true;
-  }
-  if (link.matches('button, input[type="submit"]')) {
-    return true;
-  }
-
-  return false;
-}
-
-function findLikelySubmitForm(element) {
-  var form = element && element.closest && element.closest("form");
-
-  if (isFormElement(form)) {
-    return form;
-  }
-
-  form = document.querySelector("form#cfAR");
-  if (isFormElement(form)) {
-    return form;
-  }
-
-  form = document.querySelector('form[action*="activehosted.com"], form[action*="proc.php"]');
-  if (isFormElement(form)) {
-    return form;
-  }
-
-  form = document.querySelector("form");
-  if (isFormElement(form)) {
-    return form;
-  }
-
-  return null;
-}
-
-function handlePotentialSubmitStart(event) {
-  runSafely(function() {
-    var form;
-
-    hydrateActiveCampaignForms();
-
-    if (!isSubmitFormLink(event.target)) {
+    properties = buildFormSubmittedProperties(form, null, "formdata", event.formData);
+    identifyFromProperties(properties);
+    if (!shouldProcessFormDataSubmission(form, "Form Submitted", properties)) {
       return;
     }
-
-    form = findLikelySubmitForm(event.target);
-    if (!form) {
-      return;
-    }
-
-    if (isPaymentSubmission(form)) {
-      storePendingCheckout(form, null, "click");
+    if (shouldTrackSubmission(properties)) {
+      sendTrack("Form Submitted", properties);
     }
   });
 }
 
-function handlePotentialEnterSubmit(event) {
-  runSafely(function() {
-    var form;
+function bindFormDataTrackingToForm(form) {
+  if (!isFormElement(form)) {
+    return;
+  }
+  if (isFacebookTrackingTransportForm(form)) {
+    return;
+  }
+  if (form.getAttribute("data-boom-clickfunnels-formdata-tracking")) {
+    return;
+  }
 
-    if (event.key !== "Enter") {
-      return;
-    }
+  // ClickFunnels and Kajabi use native form.submit() for their finalized submissions.
+  form.setAttribute("data-boom-clickfunnels-formdata-tracking", "1");
+  form.addEventListener("formdata", handleTrackedFormData);
+}
 
-    hydrateActiveCampaignForms();
+function bindFormDataTracking(root) {
+  if (isFormElement(root)) {
+    bindFormDataTrackingToForm(root);
+  }
+  if (!root || typeof root.querySelectorAll !== "function") {
+    return;
+  }
 
-    form = findLikelySubmitForm(event.target);
-    if (!form) {
-      return;
-    }
-
-    if (isPaymentSubmission(form)) {
-      storePendingCheckout(form, null, "enter_key");
-    }
+  root.querySelectorAll("form").forEach(function(form) {
+    bindFormDataTrackingToForm(form);
   });
+}
+
+function observeForms() {
+  var observer;
+
+  if (!document.body) {
+    return;
+  }
+
+  observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+      mutation.addedNodes.forEach(function(node) {
+        bindFormDataTracking(node);
+      });
+    });
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
+  document.__boomClickFunnelsFormDataObserver = observer;
 }
 
 export function bindFormSubmitTracking() {
@@ -712,9 +675,6 @@ export function bindFormSubmitTracking() {
   }
 
   document.__boomClickFunnelsFormSubmitTrackingBound = true;
-  document.addEventListener("submit", handleFormSubmit, true);
-  document.addEventListener("mousedown", handlePotentialSubmitStart, true);
-  document.addEventListener("touchstart", handlePotentialSubmitStart, true);
-  document.addEventListener("click", handlePotentialSubmitStart, true);
-  document.addEventListener("keydown", handlePotentialEnterSubmit, true);
+  bindFormDataTracking(document);
+  observeForms();
 }

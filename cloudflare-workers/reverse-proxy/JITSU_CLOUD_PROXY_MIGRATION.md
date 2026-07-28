@@ -1,6 +1,6 @@
 # Jitsu Cloud migration through the controlled edge proxy
 
-Status: approved migration design  
+Status: implemented locally; not deployed
 Last reviewed: 2026-07-17
 
 ## Decision
@@ -72,7 +72,7 @@ The migration is a vendor-boundary change, not a rewrite of the tracking system.
 |---|---|---|
 | Tenant routing | Map each `sg.*` hostname to its trusted root domain and allowed origins | Preserve unchanged |
 | Browser SDK delivery | Serve the collection SDK through the Worker | Serve Jitsu `/p.js` through the same Worker |
-| Browser event transport | Receive browser events at the Worker | Change the public event paths to Jitsu's standard paths |
+| Browser event transport | Receive credentialed browser events at the Worker | Use Jitsu's standard paths with a credentials-only custom Fetch implementation |
 | Server-managed anonymous identity | Establish and renew an anonymous ID before events are forwarded | Preserve with a readable Jitsu cookie plus an authoritative HttpOnly mirror |
 | Existing visitor continuity | Reuse the current Segment anonymous ID | Migrate `ajs_anonymous_id` before generating a new ID |
 | Cross-root continuity | Decorate approved links and hydrate ActiveCampaign with `ajs_aid` | Continue `ajs_aid`, add Jitsu's `an_aid`, and keep both values identical |
@@ -100,7 +100,7 @@ The migration is a vendor-boundary change, not a rewrite of the tracking system.
 | Cross-root query parameters | Segment `ajs_aid` | Emit both `ajs_aid` and `an_aid` with the same canonical ID |
 | Upstream client | `@segment/edge-sdk` | Jitsu Cloud HTTP API |
 | Upstream credentials | Segment write key | Private `JITSU_WRITE_KEY` and `JITSU_CLOUD_HOST` Worker configuration |
-| Dependency cleanup | Segment package and configuration | Remove only after the comparison and rollback window |
+| Dependency cleanup | Segment package and configuration | Removed from the local implementation; rollback uses version history rather than compatibility routes |
 
 Everything else in the Worker should be treated as preserved logic. Existing helpers for tenant resolution, CORS, attribution, cookie parsing, advertising IDs, event enrichment, deterministic IDs, and duplicate suppression should be reused unless a Jitsu payload-shape difference forces a narrow adapter.
 
@@ -151,7 +151,13 @@ getTraits()
 
 The main Segment-specific incompatibility is code such as `analytics.user().anonymousId()` and `analytics.user().traits()`. The adapter should obtain the anonymous ID from the readable Worker-managed cookie or its initialized state. Existing consumers should call the adapter rather than accessing Jitsu or Segment internals.
 
-Jitsu initialization should not emit a page event until the Worker-managed identity is available. Jitsu documents initialization-only loading and an onload hook for this sequencing.
+Jitsu initialization should not emit a page event until the Worker-managed identity is available. The adapter must distinguish between the Jitsu client object being present and the client being initialized. It should run identity-dependent bootstrap work immediately when `getState().context.initialized` is true; otherwise it should wait for the client's `ready` lifecycle event after obtaining the client through `jitsuQ`. The bootstrap callback must be idempotent so multiple readiness paths cannot emit duplicate page events or bind duplicate listeners.
+
+Jitsu documents `jitsuQ` for calls made when initialization is uncertain and documents initialization-only loading for manual page sequencing. General DOM listeners should not wait for analytics. Only the first page event, anonymous-ID propagation, and other identity-dependent work should use the Jitsu readiness gate. A readiness timeout must not be treated as successful initialization.
+
+Loading `/p.js` from the Worker makes the SDK target the Worker's standard `/api/s/*` and `/v1/batch` routes without path rewriting. Before inserting the script, the browser adapter must provide Jitsu with a credentials-only custom Fetch implementation that preserves the requested URL and options while setting `credentials: "include"`.
+
+Those event POSTs are cross-origin, so Jitsu's default Fetch credentials mode would omit the Worker-managed cookies. The credentials-only wrapper makes event requests carry those cookies and allows the browser to accept response cookies. This preserves HttpOnly identity authority, identity renewal, attribution persistence, cookie enrichment, and `_attr_event_sig` duplicate suppression without changing Jitsu's routes or constructing events manually. The validated payload `anonymousId` remains a fallback when cookies are unavailable.
 
 ## Server-managed anonymous identity
 
@@ -176,7 +182,7 @@ The page query string is not automatically copied onto the cross-origin `/p.js` 
 
 The `/p.js` browser response must be `Cache-Control: private, no-store` because its headers are visitor-specific. The unmodified upstream Jitsu script body may be cached separately inside the Worker; each browser response must still be newly wrapped with the correct cookie headers.
 
-The same identity resolver should run on every accepted event request. That lets the Worker repair a missing readable cookie from the HttpOnly mirror, renew expiry, and prevent a payload from silently switching identities.
+The same identity resolver should run on every accepted event request. The credentials-only Fetch wrapper makes the HttpOnly mirror authoritative on normal browser events, allowing the Worker to prevent a payload from silently switching identities and to renew or repair the cookie pair. If cookies are unavailable, the validated Jitsu payload identity remains the fallback. The `/p.js` response remains the initial identity bootstrap.
 
 ### Identity precedence and Segment migration
 
@@ -186,7 +192,8 @@ Use this order:
 2. Valid `__eventn_id_srvr` from the destination root domain.
 3. Valid `__eventn_id` from the destination root domain.
 4. Valid existing `ajs_anonymous_id`, normalized if legacy encoding requires it.
-5. A new ID from `crypto.randomUUID()`.
+5. For event requests only, a valid `anonymousId` or `anonymous_id` from the Jitsu payload.
+6. A new ID from `crypto.randomUUID()`.
 
 The handoff wins because its purpose is to carry the source root's identity onto the destination root. This also matches Jitsu's current native `an_aid` behavior: its browser dependency reads `an_aid` from the page URL, gives it precedence over persisted browser state, and writes it into Jitsu's readable anonymous-ID storage.
 
@@ -268,7 +275,9 @@ That does not prevent the current functionality from being preserved:
 
 - The Worker sets the cookie for the funnel's parent domain.
 - The identity is server-minted and protected by an HttpOnly mirror.
-- Every event request can renew or repair the cookie pair.
+- Every `/p.js` request can establish, renew, or repair the cookie pair before Jitsu initializes.
+- Credentialed event requests can renew or repair the cookie pair and preserve cookie-based attribution behavior.
+- Event requests retain identity through the validated Jitsu payload when cookies are unavailable.
 - Jitsu is not exposed as a third-party browser-facing CNAME target.
 
 No cookie can be promised to be permanent. Users can clear storage, private browsing is ephemeral, and browser policies can change. Safari return-visitor tests remain a required launch check.
@@ -344,232 +353,9 @@ Vary: Origin
 
 Preflight handling should continue to allow only the methods and headers the SDK actually uses. Unknown origins must not be echoed, and credentialed responses must never use `Access-Control-Allow-Origin: *`.
 
-## V2: Cookiebot consent integration
+## Deferred V2: Cookiebot consent
 
-Status: deferred. Nothing in this section is required for the initial Segment-to-Jitsu cutover.
-
-V1 preserves the current collection behavior while changing the vendor boundary. Cookiebot gating, consent-aware routing, opt-out cleanup, and consent-specific endpoints are a separate V2 implementation.
-
-### Integration decision
-
-Jitsu does not automatically understand Cookiebot. A small browser adapter must read Cookiebot and call Jitsu's documented consent controls.
-
-Cookiebot exposes:
-
-```text
-Cookiebot.consent.necessary
-Cookiebot.consent.preferences
-Cookiebot.consent.statistics
-Cookiebot.consent.marketing
-Cookiebot.consent.method
-Cookiebot.hasResponse
-Cookiebot.doNotTrack
-```
-
-Cookiebot also emits `CookiebotOnConsentReady`, `CookiebotOnAccept`, and `CookiebotOnDecline`. `CookiebotOnConsentReady` fires when consent is available from either a new response or the existing CookieConsent cookie.
-
-Jitsu supports runtime `configure()` calls with:
-
-```text
-privacy.dontSend
-privacy.disableUserIds
-privacy.ipPolicy
-privacy.consentCategories
-```
-
-Jitsu places `consentCategories` on each event as `context.consent.categoryPreferences`. Jitsu documents two pre-consent modes: send nothing, or send limited events without identifiers. This project should begin with **send nothing before consent** because the Worker otherwise sets a persistent anonymous-ID cookie on `/p.js` before the user's decision.
-
-### Recommended category policy
-
-This table is the technical launch policy. Privacy counsel must approve the final purposes, retention, regional rules, and disclosures.
-
-| Cookiebot state | Browser behavior | Worker behavior | Destination behavior |
-|---|---|---|---|
-| Consent not ready | Do not request `/p.js`; queue no analytics calls | Do not mint tracking identity | No Jitsu event |
-| Necessary only / declined | Keep Jitsu disabled | Allow only consent control and explicitly approved operational requests; do not create a persistent analytics ID | No statistics or marketing destination |
-| Statistics accepted | Enable approved page and product-analytics events | Permit anonymous identity; minimize IP according to policy | Permit statistics and restricted warehouse connections |
-| Marketing accepted | Enable approved marketing measurements in addition to any other accepted categories | Permit approved ad-ID enrichment | Permit marketing connections only while `marketing=true` |
-| Consent withdrawn | Disable Jitsu immediately and call `POST /consent` | Expire Worker-managed identity and attribution cookies and stop minting | Drop future non-necessary events |
-
-Cookiebot categories are independent. The adapter and Worker must evaluate each category rather than treating `Cookiebot.consented` as permission for every purpose.
-
-### Browser adapter
-
-Register Cookiebot listeners before the Cookiebot script can emit them. Use one idempotent handler for initial state and subsequent changes:
-
-```javascript
-function readCookiebotConsent() {
-  return {
-    necessary: Boolean(Cookiebot.consent.necessary),
-    preferences: Boolean(Cookiebot.consent.preferences),
-    statistics: Boolean(Cookiebot.consent.statistics),
-    marketing: Boolean(Cookiebot.consent.marketing),
-  };
-}
-
-function applyCookiebotConsent() {
-  var categories = readCookiebotConsent();
-  var maySendAnalytics = categories.statistics || categories.marketing;
-
-  if (!window.jitsu || typeof window.jitsu.configure !== "function") {
-    return categories;
-  }
-
-  jitsu.configure({
-    privacy: {
-      dontSend: !maySendAnalytics,
-      disableUserIds: !maySendAnalytics,
-      ipPolicy: maySendAnalytics ? "stripLastOctet" : "remove",
-      consentCategories: categories,
-    },
-  });
-
-  return categories;
-}
-```
-
-On the initial `CookiebotOnConsentReady` call, the returned category map decides whether Jitsu should be loaded. After Jitsu's onload callback, call the same handler again to apply the privacy configuration before emitting the first event.
-
-The production adapter must also gate calls by purpose:
-
-- `page` and ordinary behavioral `track` calls require `statistics=true`.
-- Marketing measurements, ad-cookie enrichment, and marketing destination activation require `marketing=true`.
-- `identify` with email or another direct identifier must follow the approved form purpose and destination policy; it must not be enabled merely because statistics consent exists.
-- Preference-only behavior requires `preferences=true`.
-
-Jitsu's global privacy flags cannot express all those event-purpose distinctions by themselves. The browser adapter and Worker event allowlist must enforce them.
-
-### Loading order
-
-The default launch sequence is:
-
-1. Register Cookiebot event listeners.
-2. Load Cookiebot.
-3. Wait for `CookiebotOnConsentReady`.
-4. Read the four category booleans.
-5. If neither statistics nor marketing is allowed, do not request Jitsu `/p.js`.
-6. If an allowed purpose exists, load Jitsu in initialization-only mode through the Worker.
-7. Resolve the cross-root handoff and Worker cookie pair.
-8. Configure Jitsu with the Cookiebot category snapshot.
-9. Emit only the events allowed by those categories.
-
-This avoids creating Jitsu cookies before Cookiebot has resolved the visitor's choice. It also preserves the no-extra-identity-request design: `/p.js` still performs identity bootstrap when Jitsu is allowed to load.
-
-### Worker enforcement
-
-Browser gating is not sufficient. The Worker should enforce the same policy before forwarding:
-
-1. Read the root-domain `CookieConsent` cookie when present. Cookiebot documents server-side parsing of this cookie for server-set cookies.
-2. Accept a normalized consent snapshot from the browser for immediate consent changes.
-3. Resolve discrepancies conservatively and never treat missing consent as permission.
-4. Write the normalized booleans to `context.consent.categoryPreferences`.
-5. Apply an event-purpose allowlist before enrichment and forwarding.
-6. Do not collect advertising-cookie values unless `marketing=true`.
-7. Do not mint or renew a persistent Jitsu identity unless the approved policy permits it.
-8. Apply the configured IP policy before forwarding.
-
-The Worker must not trust a caller-supplied label such as `purpose=necessary` by itself. Necessary operational events must be an explicit allowlist of event names and properties.
-
-### Withdrawal and opt-out
-
-Provide Cookiebot's Privacy Trigger or an equivalent visible control using `Cookiebot.renew()` so visitors can change their choices. Cookiebot also exposes `withdraw()` for withdrawing consent.
-
-When consent is declined or withdrawn:
-
-1. Call Jitsu `configure()` with `dontSend=true`, `disableUserIds=true`, `ipPolicy="remove"`, and the current category map.
-2. Send one credentialed `POST /consent` control request to the Worker. This is the only additional request introduced by consent changes; it is not part of ordinary page initialization.
-3. Expire `__eventn_id`, `__eventn_id_srvr`, `_attr_current`, `_attr_current_js`, and `_attr_event_sig` when their purposes are no longer allowed.
-4. Stop advertising-ID extraction and non-necessary forwarding.
-5. If an audit record is required, store a minimal no-identity consent-change record. Do not send it through a marketing destination.
-
-The HttpOnly cookie must be cleared by the Worker. Clearing only Jitsu's readable cookie would leave `__eventn_id_srvr`, allowing the Worker to restore the identity on a later request.
-
-If the visitor later grants consent again, create a new anonymous ID unless the approved privacy policy explicitly allows restoring the old one. Jitsu's runtime implementation also generates a new anonymous ID when identifiers are re-enabled after being disabled.
-
-### Explicit form submissions and email
-
-Cookie consent and a person's deliberate form submission are separate processing decisions. A submitted email may be required to deliver a requested lead magnet, appointment, account, or service, but that does not automatically authorize analytics profiling, advertising activation, or email marketing.
-
-Recommended separation:
-
-- Keep the submitted email in the system of record that fulfills the request, such as ClickFunnels, ActiveCampaign, or the application backend.
-- Keep raw email out of ordinary Jitsu page and behavioral events unless there is a documented need and approved legal basis.
-- If Jitsu must carry an operational submission event, use a separately classified event or Site, an explicit property allowlist, a restricted retention policy, and connections that exclude all marketing destinations.
-- Record email-marketing permission separately from Cookiebot's `marketing` cookie category. Cookiebot marketing-cookie consent is not, by itself, proof of subscription to marketing email.
-- Provide the applicable unsubscribe, consent-change, deletion, and data-subject request mechanisms outside the analytics SDK.
-
-Not using collected information for marketing does not by itself make collection consent-free. Cookie storage, audience measurement, form fulfillment, CRM storage, and email marketing can have different legal bases and notice requirements.
-
-### Jitsu destination enforcement
-
-Attach a Jitsu Function to every statistics and marketing connection. Jitsu Cloud Functions can return `"drop"` to prevent an event from reaching that destination.
-
-Marketing connection example:
-
-```javascript
-export default async function transform(event) {
-  var consent = event.context?.consent?.categoryPreferences;
-
-  if (!consent?.marketing) {
-    return "drop";
-  }
-
-  return event;
-}
-```
-
-Use an equivalent `statistics` check for statistics connections. Operational connections should allow only approved operational event names and strip all properties that are not required for that purpose.
-
-Jitsu Functions apply to warehouse and Cloud Destinations, not Device Destinations. Do not rely on a Jitsu Function to protect a browser-executed Device Destination. Gate device scripts with Cookiebot before execution or leave them disconnected during the first migration.
-
-### V2 implementation impact
-
-Worker changes:
-
-- Add `POST /consent` and its credentialed `OPTIONS` response.
-- Parse and normalize Cookiebot state.
-- Enforce event purposes and consent-specific property allowlists.
-- Stop identity minting and enrichment when the applicable purpose is not allowed.
-- Expire Worker-managed identity and attribution cookies on withdrawal.
-
-ClickFunnels helper changes:
-
-- Add a Cookiebot consent adapter.
-- Delay or configure Jitsu according to Cookiebot state.
-- Purpose-gate `page`, `track`, `identify`, and marketing measurements.
-- Call `POST /consent` when consent is declined or withdrawn.
-
-Jitsu Cloud changes:
-
-- Attach tested consent-drop Functions to statistics and marketing connections.
-- Keep Device Destinations disabled until their scripts are gated directly by Cookiebot.
-- Separate operational form-submission flows from statistics and marketing connections.
-
-### V2 validation checklist
-
-- Jitsu `/p.js` is not requested before `CookiebotOnConsentReady` under the default no-pre-consent policy.
-- Cookiebot's necessary, preferences, statistics, and marketing values appear in `context.consent.categoryPreferences`.
-- Statistics events are blocked when statistics consent is false.
-- Marketing events and advertising IDs are blocked when marketing consent is false.
-- `identify` and group behavior follow the approved identifier policy rather than a generic accepted/declined flag.
-- Missing or malformed Cookiebot consent is treated as no permission.
-- Decline and withdrawal call `POST /consent` and expire the readable and HttpOnly identity cookies.
-- Attribution cookies are removed when their approved purposes are withdrawn.
-- Jitsu does not recreate an identity after withdrawal until an allowed consent state is established.
-- Re-consent creates a new identity unless the approved policy says otherwise.
-- Every statistics and marketing Jitsu connection has a tested consent-drop Function.
-- Device Destinations cannot execute before their Cookiebot category is allowed.
-- Explicit form fulfillment still works when analytics consent is denied, without routing the email to marketing destinations.
-
-### V2 evidence
-
-- [Jitsu Consent Management](https://jitsu.com/docs/sending-data/consent-management): CMP callbacks, `configure()`, `dontSend`, identifier suppression, IP policy, consent categories, and Jitsu's two pre-consent modes.
-- [Jitsu Functions](https://jitsu.com/docs/functions): connection-level filtering and the `"drop"` return value that prevents an event from reaching a destination.
-- [Jitsu Core Concepts](https://jitsu.com/docs/core-concepts): connections, destination types, and the limitation that Functions do not apply to Device Destinations.
-- [Cookiebot Developer Resources](https://www.cookiebot.com/en/developer/): consent category properties, readiness/accept/decline events, `renew()`, `withdraw()`, automatic blocking, and server-side `CookieConsent` parsing.
-- [Cookiebot consent-loading events](https://support.cookiebot.com/hc/en-us/articles/360020661139-How-to-find-out-when-the-Cookiebot-script-has-loaded): when Cookiebot's consent events fire and how to register listeners.
-
-Current Jitsu source also shows that [`configure()` resets identifier storage when privacy disables sending or identifiers](https://github.com/jitsucom/jitsu/blob/aa2c987891131cad2664c25af2551d7daf4a9899/libs/jitsu-js/src/index.ts#L217-L228) and that [`consentCategories` are written to event context](https://github.com/jitsucom/jitsu/blob/aa2c987891131cad2664c25af2551d7daf4a9899/libs/jitsu-js/src/analytics-plugin.ts#L559-L570). The V2 Worker must still clear its separate HttpOnly mirror on withdrawal.
+Cookiebot gating and consent-aware collection are intentionally outside this V1 migration. The complete V2 design, implementation impact, validation checklist, and evidence are in [JITSU_COOKIEBOT_CONSENT_V2.md](JITSU_COOKIEBOT_CONSENT_V2.md).
 
 ## Code impact
 
@@ -591,7 +377,7 @@ Expected changes:
 - Add the Jitsu identity cookie pair and migrate `ajs_anonymous_id`.
 - Resolve matching `ajs_aid` and `an_aid` before local cookies.
 - Add Jitsu configuration and secrets.
-- Remove `@segment/edge-sdk` only after cutover validation.
+- Remove `@segment/edge-sdk` from the Jitsu implementation.
 
 Expected to remain behaviorally unchanged:
 
@@ -610,9 +396,9 @@ Primary files:
 ```text
 clickfunnels/src/config.js
 clickfunnels/src/tracking-hosts.js
-clickfunnels/src/segment-loader.js
-clickfunnels/src/segment-user.js
-clickfunnels/src/segment-track.js
+clickfunnels/src/jitsu-loader.js
+clickfunnels/src/analytics-client.js
+clickfunnels/src/analytics-track.js
 clickfunnels/src/attr-tracking.js
 clickfunnels/src/links.js
 clickfunnels/src/index.js
@@ -690,10 +476,10 @@ File renames are optional cleanup, not a migration requirement.
 5. Send test traffic to isolated Jitsu destinations.
 6. Compare event counts, identities, attribution, payloads, duplicates, and Safari return visits.
 7. Cut the browser helper over to Jitsu through the Worker.
-8. Keep the prior Worker and helper builds deployable during the monitoring window.
-9. Remove Segment code, dependency, key, and runtime configuration only after acceptance.
+8. Keep the prior deployed Worker version available through deployment history during the monitoring window.
+9. Remove the retired Segment key and runtime configuration after acceptance.
 
-Rollback consists of restoring the previous Worker deployment and browser helper, then confirming `/route/ajs/*` and `/route/evs/*` health. Do not delete the Segment implementation until that rollback window closes.
+Rollback consists of restoring the previous Worker deployment and browser-helper artifact from version history. The Jitsu implementation does not retain Segment routes or SDK compatibility code.
 
 ## Evidence
 
@@ -706,6 +492,8 @@ Rollback consists of restoring the previous Worker deployment and browser helper
 - [Cloudflare Worker Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/): a Worker becomes the hostname's origin, and an existing CNAME conflicts with that setup.
 - [WebKit CNAME Cloaking and Bounce Tracking Defense](https://webkit.org/blog/11338/cname-cloaking-and-bounce-tracking-defense/): Safari's distinction between ordinary first-party subdomains and third-party CNAME-cloaked response cookies.
 
-Repository evidence for the current uniqueness behavior is in the installed `@segment/edge-sdk`: it calls UUID v4 when no anonymous ID is supplied. The replacement's `crypto.randomUUID()` preserves that identity-generation model.
+Pinned source evidence for credentialed event transport is Jitsu's [browser configuration merge](https://github.com/jitsucom/jitsu/blob/aa2c987891131cad2664c25af2551d7daf4a9899/libs/jitsu-js/src/browser.ts#L104-L112), which preserves `window.jitsuConfig` function values, and the [event sender](https://github.com/jitsucom/jitsu/blob/aa2c987891131cad2664c25af2551d7daf4a9899/libs/jitsu-js/src/analytics-plugin.ts#L786-L823), which selects `jitsuConfig.fetch` for standard event requests. This source-backed contract requires a real-browser cutover check so a future SDK change cannot silently remove credentialed transport.
+
+Pre-migration repository evidence showed that `@segment/edge-sdk` called UUID v4 when no anonymous ID was supplied. The replacement's `crypto.randomUUID()` preserves that identity-generation model without keeping the Segment dependency.
 
 Current source evidence for `an_aid` is [Jitsu's pinned `analytics@0.8.9` dependency](https://github.com/jitsucom/jitsu/blob/aa2c987891131cad2664c25af2551d7daf4a9899/libs/jitsu-js/package.json#L57-L59), the dependency's [`an_aid` parsing and precedence](https://github.com/DavidWells/analytics/blob/analytics%400.8.9/packages/analytics-core/src/index.js#L162-L175), and its [anonymous-ID persistence](https://github.com/DavidWells/analytics/blob/analytics%400.8.9/packages/analytics-core/src/middleware/initialize.js#L14-L20). Because this behavior is source-backed rather than documented in Jitsu's public JavaScript reference, it requires an end-to-end contract test.

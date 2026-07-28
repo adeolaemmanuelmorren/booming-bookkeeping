@@ -1,5 +1,5 @@
-import { GA4_STANDARD_EVENT_MAP } from "./config.js";
-import { getSegmentUserTraits } from "./segment-user.js";
+import { GA4_EVENT_CONFIG } from "./config.js";
+import { getUserTraits } from "./analytics-client.js";
 import { copyFirstTraitValue, firstAttributionValue, getNestedObject, mergeObjects } from "./utils.js";
 
 export function buildGoogleApiCompliantAttribution(attribution, identity) {
@@ -35,18 +35,18 @@ export function buildDataLayerTraits(properties, traits, context) {
   context = context || {};
 
   var contextTraits = context.traits || {};
-  var segmentTraits = getSegmentUserTraits();
+  var analyticsTraits = getUserTraits();
   var output = mergeObjects({}, traits);
-  var sources = [properties, traits, contextTraits, segmentTraits];
+  var sources = [properties, traits, contextTraits, analyticsTraits];
   var addressSources = [
     properties,
     traits,
     contextTraits,
-    segmentTraits,
+    analyticsTraits,
     getNestedObject(properties, "address"),
     getNestedObject(traits, "address"),
     getNestedObject(contextTraits, "address"),
-    getNestedObject(segmentTraits, "address"),
+    getNestedObject(analyticsTraits, "address"),
   ];
 
   output.address = mergeObjects({}, getNestedObject(traits, "address"));
@@ -67,11 +67,15 @@ export function buildDataLayerTraits(properties, traits, context) {
   return output;
 }
 
-export function transformToGA4Standard(eventName) {
-  var ga4EventName = GA4_STANDARD_EVENT_MAP[eventName];
-  if (!ga4EventName) {
+export function getGA4EventConfig(eventName) {
+  var eventConfig = GA4_EVENT_CONFIG[eventName];
+
+  if (!eventConfig) {
     return null;
   }
 
-  return { ga4_event: ga4EventName, ga4_event_type: "standard" };
+  return {
+    ga4_event: eventConfig.eventName,
+    ga4_event_type: eventConfig.eventType,
+  };
 }

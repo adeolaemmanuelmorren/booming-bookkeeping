@@ -3,10 +3,18 @@ config {
   description: "Successful Stripe charges classified using the documented product-resolution priority and exact business rules.",
   tags: ["intermediate", "stripe", "payments", "products"],
   bigquery: {
-    partitionBy: "DATE(payment_time)",
     clusterBy: ["customer_id", "product_rule"],
   },
 }
+
+js {
+  const { dropPartitionedTableOnce } = require("includes/table_migrations");
+}
+
+pre_operations {
+  ${dropPartitionedTableOnce(self())}
+}
+
 
 with signals as (
   select
@@ -23,6 +31,12 @@ with signals as (
       )),
       r'keyboard rich book'
     ) as is_keyboard_rich_book,
+    lower(trim(coalesce(payment.metadata_products, '')))
+      = 'top tax loopholes for bookkeeping business owners'
+      as is_top_tax_loopholes,
+    lower(trim(coalesce(payment.metadata_products, '')))
+      = 'booming bookkeeping mentorship program (one-time payment - save $994)'
+      as is_mentorship_full_payment_metadata,
     payment.amount_cents = 4700
       and regexp_contains(payment.classification_signal, r'(keyboard rich|keyboardrich|krc)')
       and regexp_contains(payment.classification_signal, r'(vip|backstage|basic package|platinum)')
@@ -40,10 +54,12 @@ matched as (
     signals.*,
     case
       when is_keyboard_rich_book then 'keyboard_rich_book'
+      when is_top_tax_loopholes then 'top_tax_loopholes'
       when has_basic_vip_product or has_basic_vip_price or has_basic_vip_payment_link then 'structured_basic_vip'
       when has_krc_product or has_krc_price then 'structured_keyboard_rich_challenge'
       when is_47_vip then 'keyboard_rich_challenge_vip'
       when is_mentorship_deposit then 'mentorship_deposit'
+      when is_mentorship_full_payment_metadata then 'mentorship_full_payment'
       when has_full_payment_product or has_full_payment_price then 'mentorship_full_payment'
       when has_3x1997_product or has_3x1997_plan then 'mentorship_3x1997'
       when has_balance_product or has_balance_price then 'mentorship_balance'
@@ -56,17 +72,20 @@ matched as (
 classified as (
   select
     matched.*,
-    case product_rule
-      when 'structured_basic_vip' then 'prod_RtWRamfeN5cGXG'
-      when 'structured_keyboard_rich_challenge' then 'prod_RL2UJfDpmvCvRx'
-      when 'mentorship_full_payment' then 'prod_RlhQH6wdxzjZeZ'
-      when 'mentorship_3x1997' then 'prod_PtzEmmHhC1K9Xi'
-      when 'mentorship_balance' then 'prod_RtWNqT9xux5CI7'
-      when 'catalog_product' then catalog_product_id
+    case
+      when is_mentorship_full_payment_metadata
+        then coalesce(catalog_product_id, 'mentorship_full_payment')
+      when product_rule = 'structured_basic_vip' then 'prod_RtWRamfeN5cGXG'
+      when product_rule = 'structured_keyboard_rich_challenge' then 'prod_RL2UJfDpmvCvRx'
+      when product_rule = 'mentorship_full_payment' then 'prod_RlhQH6wdxzjZeZ'
+      when product_rule = 'mentorship_3x1997' then 'prod_PtzEmmHhC1K9Xi'
+      when product_rule = 'mentorship_balance' then 'prod_RtWNqT9xux5CI7'
+      when product_rule = 'catalog_product' then catalog_product_id
       else catalog_product_id
     end as product_id,
     case product_rule
       when 'keyboard_rich_book' then 'Keyboard Rich book'
+      when 'top_tax_loopholes' then 'Top Tax Loopholes for Bookkeeping Business Owners'
       when 'structured_basic_vip' then 'KRC - Basic VIP'
       when 'structured_keyboard_rich_challenge' then 'Keyboard Rich Challenge'
       when 'keyboard_rich_challenge_vip' then '$47 Keyboard Rich Challenge VIP'
@@ -93,16 +112,18 @@ classified as (
         then 'Book + audiobook/no shipping label'
       else 'Book/no shipping label'
     end as product_variant,
-    case product_rule
-      when 'keyboard_rich_book' then 'charge_statement_descriptor'
-      when 'keyboard_rich_challenge_vip' then 'charge_amount_and_text'
-      when 'mentorship_deposit' then 'charge_description_and_amount'
-      when 'structured_basic_vip' then 'stripe_catalog_or_payment_link'
-      when 'structured_keyboard_rich_challenge' then 'stripe_catalog'
-      when 'mentorship_full_payment' then 'stripe_catalog'
-      when 'mentorship_3x1997' then 'stripe_plan_or_catalog'
-      when 'mentorship_balance' then 'stripe_catalog'
-      when 'catalog_product' then catalog_source
+    case
+      when is_mentorship_full_payment_metadata then 'charge_metadata_products'
+      when product_rule = 'keyboard_rich_book' then 'charge_statement_descriptor'
+      when product_rule = 'top_tax_loopholes' then 'charge_metadata_products'
+      when product_rule = 'keyboard_rich_challenge_vip' then 'charge_amount_and_text'
+      when product_rule = 'mentorship_deposit' then 'charge_description_and_amount'
+      when product_rule = 'structured_basic_vip' then 'stripe_catalog_or_payment_link'
+      when product_rule = 'structured_keyboard_rich_challenge' then 'stripe_catalog'
+      when product_rule = 'mentorship_full_payment' then 'stripe_catalog'
+      when product_rule = 'mentorship_3x1997' then 'stripe_plan_or_catalog'
+      when product_rule = 'mentorship_balance' then 'stripe_catalog'
+      when product_rule = 'catalog_product' then catalog_source
       else 'unclassified'
     end as product_classification_method,
     product_rule != 'unclassified' as is_product_classified
@@ -112,6 +133,8 @@ classified as (
 select
   classified.* except (
     is_keyboard_rich_book,
+    is_top_tax_loopholes,
+    is_mentorship_full_payment_metadata,
     is_47_vip,
     is_mentorship_deposit,
     has_basic_vip_product,
@@ -127,4 +150,3 @@ select
     has_balance_price
   )
 from classified
-
