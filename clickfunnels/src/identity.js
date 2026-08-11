@@ -1,4 +1,5 @@
 import { sendIdentify } from "./analytics-track.js";
+import { normalizePhoneNumber } from "./phone.js";
 
 var EMAIL_SELECTORS = ['input[type="email"]', 'input[name="email"]', 'input[name="Email"]', 'input[name="email_address"]', 'input[name="emailAddress"]'];
 var PHONE_SELECTORS = ['input[type="tel"]', 'input[type="phone"]', 'input[name="phone"]', 'input[name="Phone"]', 'input[name="mobile"]', 'input[name="phone_number"]', 'input[name="phoneNumber"]'];
@@ -7,16 +8,8 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 }
 
-function normalizePhone(value) {
-  var raw = String(value || "").trim();
-  var prefix = raw.charAt(0) === "+" ? "+" : "";
-  var digits = raw.replace(/[^0-9]/g, "").replace(/^0+/, "");
-
-  return prefix + digits;
-}
-
 function isValidPhone(value) {
-  return /^\+?[0-9]{1,15}$/.test(normalizePhone(value));
+  return Boolean(normalizePhoneNumber(value));
 }
 
 export function identifyFromInput(input, type) {
@@ -38,7 +31,7 @@ export function identifyFromInput(input, type) {
   }
 
   if (type === "phone" && isValidPhone(value)) {
-    sendIdentify("", { phone: normalizePhone(value) });
+    sendIdentify("", { phone: normalizePhoneNumber(value) });
     input.setAttribute(lastIdentifiedAttribute, value);
   }
 }
@@ -92,7 +85,9 @@ export function identifyFromForm(form) {
 
 export function identifyFromProperties(properties) {
   var email = String(properties && properties.email || "").trim();
-  var phone = normalizePhone(properties && properties.phone);
+  var phone = normalizePhoneNumber(
+    properties && (properties.phone_number || properties.phone)
+  );
   var traits = {};
 
   if (isValidEmail(email)) {
@@ -109,6 +104,14 @@ export function identifyFromProperties(properties) {
   }
   if (properties && properties.last_name) {
     traits.last_name = properties.last_name;
+  }
+  if (
+    properties &&
+    properties.address &&
+    typeof properties.address === "object" &&
+    !Array.isArray(properties.address)
+  ) {
+    traits.address = properties.address;
   }
 
   if (!traits.email && !traits.phone) {

@@ -19,7 +19,7 @@ Last updated: July 27, 2026
 | Webinar registration | `Form Submitted` → `generate_lead` | ActiveCampaign registration tag | `form_submission_<sha256(email\|webinar\|Pacific date)>` | Same formula | `event_name = generate_lead` and `lead_source = webinar` |
 | Keyboard Rich Book | `Order Completed` → `purchase` | Main Stripe | `purchase_<charge_id>` | `purchase_<charge_id>` | `event_name = purchase` and `items.0.item_id` contains `keyboard rich book` |
 | Challenge VIP | `Order Completed` → `purchase` | Main Stripe | `purchase_<charge_id>` | `purchase_<charge_id>` | `event_name = purchase` and `items.0.item_id` contains `vip` |
-| Mentorship | `Order Completed` → `purchase` | Main Stripe | `purchase_<charge_id>` | `purchase_<charge_id>` | `event_name = purchase` and `items.0.item_id` matches `(deposit\|one-time payment\|payment plan\|3 payments)` |
+| Mentorship | `Order Completed` → `purchase` | Main Stripe | `purchase_<charge_id>` | `purchase_<charge_id>` | `event_name = purchase` and `items.0.item_id` matches `(deposit\|one-time payment\|payment plan\|3 payments\|installment)` |
 | Kajabi mentorship | `Order Completed` → `purchase` | Kajabi Stripe | `purchase_<charge_id>` | `purchase_<charge_id>` | `event_name = purchase` and `items.0.item_id` equals `booming bookkeeping mentorship program` |
 
 For purchases, GA4 `transaction_id` is the raw Stripe Charge ID. Renewals and later payment-plan collections remain payments but are excluded from new-order conversions.
@@ -50,7 +50,7 @@ When adding a registration form, update both mappings. The browser identifies a 
 | --- | --- | --- |
 | `book` | Contains `keyboard rich book` or `top tax loopholes` | Stripe product line names become normalized `content_ids` and GA4 items |
 | `vip` | Contains `vip` or `keyboard rich challenge` | Trigger from normalized VIP/Challenge item names |
-| `mentorship` | Main Stripe and contains `booming bookkeeping mentorship program` | Later installments and renewals are filtered as repeat payments |
+| `mentorship` | Main Stripe and contains `booming bookkeeping mentorship program`, or the exact `$4,997` `booming bookkeeping installment` checkout product | Smaller custom installments and later subscription collections remain excluded |
 | `kajabi` | Kajabi Stripe and contains `booming bookkeeping mentorship program` | Only the initial subscription payment is a new order |
 
 SEGRETL builds `product_id`, `content_ids`, and product names directly from

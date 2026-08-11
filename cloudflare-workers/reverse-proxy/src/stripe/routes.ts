@@ -10,7 +10,12 @@ import {
 	type Env,
 	type TenantConfig,
 } from '../jitsu-proxy';
-import type { ConfirmedProduct, PurchaseAttemptInput, StripeAccount } from './types';
+import type {
+	ConfirmedAddress,
+	ConfirmedProduct,
+	PurchaseAttemptInput,
+	StripeAccount,
+} from './types';
 
 export const PURCHASE_ATTEMPT_PATH = '/v1/purchase-attempts';
 export const PURCHASE_POLL_PATH = '/v1/purchase-confirmations';
@@ -75,6 +80,20 @@ function toBrowserProduct(product: ConfirmedProduct, currency: string) {
 	};
 }
 
+function toBrowserAddress(address: ConfirmedAddress) {
+	return {
+		city: address.city,
+		country: address.country,
+		postal_code: address.postalCode,
+		region: address.region,
+		street: address.street,
+	};
+}
+
+function toPaymentSource(account: StripeAccount): 'stripe' | 'stripe_kajabi' {
+	return account === 'kajabi' ? 'stripe_kajabi' : 'stripe';
+}
+
 export async function handlePurchaseAttemptRequest(
 	request: Request,
 	env: Env,
@@ -124,11 +143,13 @@ export async function handlePurchasePollRequest(
 	const result = await state.poll(account);
 	const response = new Response(JSON.stringify({
 		charges: result.charges.map((charge) => ({
+			address: toBrowserAddress(charge.address),
 			charge_id: charge.chargeId,
 			content_ids: charge.contentIds,
 			currency: charge.currency,
 			email: charge.email,
 			name: charge.name,
+			payment_source: toPaymentSource(charge.stripeAccount),
 			phone: charge.phone,
 			product_id: charge.productId,
 			product_name: charge.productName,

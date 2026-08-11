@@ -1,5 +1,38 @@
 import { normalizeProductName } from "./event-ids.js";
 
+// Keep this aligned with:
+// dataform/definitions/output/segment/segretl_repeatable_conversions.sqlx
+//
+// Meta already uses krc-paid-vip for campaign and ad-set optimization. The
+// high-ticket rule keeps all main-Stripe mentorship purchases under one stable
+// content type without grouping the Kajabi subscription into that audience.
+var PURCHASE_CONTENT_TYPE_RULES = [
+  {
+    contentType: "krc-paid-vip",
+    contentIdPatterns: [
+      /^vip basic package(?:\b|$)/,
+      /^keyboard rich challenge basic vip(?:\b|$)/,
+      /^5-day keyboard rich challenge vip ticket(?:\b|$)/,
+      /^krc - basic vip(?:\b|$)/,
+    ],
+  },
+  {
+    contentType: "bbb-high-ticket",
+    paymentSource: "stripe",
+    contentIdPatterns: [
+      /^booming bookkeeping mentorship program(?:\b|$)/,
+    ],
+  },
+  {
+    contentType: "bbb-high-ticket",
+    paymentSource: "stripe",
+    value: 4997,
+    contentIdPatterns: [
+      /^booming bookkeeping installment$/,
+    ],
+  },
+];
+
 function getNormalizedProductNames(properties) {
   var contentIds = [];
   var seen = {};
@@ -49,6 +82,31 @@ function getNormalizedProductNames(properties) {
   return [fallbackContentId];
 }
 
+function ruleMatchesPurchase(rule, contentIds, properties) {
+  var paymentSource = String(properties.payment_source || "").toLowerCase();
+
+  if (rule.paymentSource && rule.paymentSource !== paymentSource) {
+    return false;
+  }
+  if (rule.value !== void 0 && Number(properties.value) !== rule.value) {
+    return false;
+  }
+
+  return contentIds.some(function(contentId) {
+    return rule.contentIdPatterns.some(function(pattern) {
+      return pattern.test(contentId);
+    });
+  });
+}
+
+function getPurchaseContentType(contentIds, properties) {
+  var matchedRule = PURCHASE_CONTENT_TYPE_RULES.find(function(rule) {
+    return ruleMatchesPurchase(rule, contentIds, properties);
+  });
+
+  return matchedRule ? matchedRule.contentType : "product";
+}
+
 function buildPurchaseContext(properties) {
   var contentIds = getNormalizedProductNames(properties);
   var contents = Array.isArray(properties.fb_contents)
@@ -57,7 +115,7 @@ function buildPurchaseContext(properties) {
   var output = {
     content_ids: contentIds,
     content_name: String(properties.product_name || "").trim(),
-    content_type: "product",
+    content_type: getPurchaseContentType(contentIds, properties),
   };
 
   if (contents.length) {

@@ -1,8 +1,14 @@
 import { parse as parseCookie, stringify as cookie, type Attributes } from 'worktop/cookie';
+import {
+	BROWSER_CONSENT_HEADER,
+	applyConsentContext,
+	resolveEventConsent,
+} from './consent/event-consent';
+import type { ConsentEnv, EventConsent } from './consent/types';
 import type { PurchaseState } from './stripe/purchase-state';
 import type { PurchaseEnv } from './stripe/types';
 
-export interface Env extends PurchaseEnv {
+export interface Env extends PurchaseEnv, ConsentEnv {
 	JITSU_CLOUD_HOST: string;
 	JITSU_WRITE_KEY: string;
 	PURCHASE_STATE: DurableObjectNamespace<PurchaseState>;
@@ -300,6 +306,16 @@ function getAnonymousIdCookieHeaders(request: Request, tenant: TenantConfig, ano
 	];
 }
 
+function getLocalAnonymousId(request: Request): string | undefined {
+	const cookies = parseCookie(request.headers.get('cookie') || '');
+
+	return (
+		normalizeAnonymousId(cookies[JITSU_SERVER_ANONYMOUS_ID_COOKIE]) ??
+		normalizeAnonymousId(cookies[JITSU_ANONYMOUS_ID_COOKIE]) ??
+		normalizeAnonymousId(cookies[SEGMENT_ANONYMOUS_ID_COOKIE])
+	);
+}
+
 function getHandoffIdentity(url: URL): { anonymousId?: string; conflict: boolean } {
 	const hasAjsAid = url.searchParams.has('ajs_aid');
 	const hasAnAid = url.searchParams.has('an_aid');
@@ -331,12 +347,9 @@ function resolveAnonymousIdentity(
 	payloadAnonymousId?: string,
 ): ResolvedIdentity {
 	const handoff = getHandoffIdentity(new URL(request.url));
-	const cookies = parseCookie(request.headers.get('cookie') || '');
 	const anonymousId =
 		handoff.anonymousId ??
-		normalizeAnonymousId(cookies[JITSU_SERVER_ANONYMOUS_ID_COOKIE]) ??
-		normalizeAnonymousId(cookies[JITSU_ANONYMOUS_ID_COOKIE]) ??
-		normalizeAnonymousId(cookies[SEGMENT_ANONYMOUS_ID_COOKIE]) ??
+		getLocalAnonymousId(request) ??
 		payloadAnonymousId ??
 		crypto.randomUUID();
 
@@ -690,7 +703,10 @@ function handlePreflight(allowedOrigin: string | null): Response {
 
 	headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
 
-	headers.set('Access-Control-Allow-Headers', 'Content-Type');
+	headers.set(
+		'Access-Control-Allow-Headers',
+		`Content-Type, ${BROWSER_CONSENT_HEADER}`,
+	);
 
 	headers.set('Access-Control-Max-Age', '86400');
 
@@ -735,8 +751,10 @@ async function prepareJitsuEvent(
 	tenant: TenantConfig,
 	body: Record<string, unknown>,
 	anonymousId: string,
+	consent: EventConsent,
 ): Promise<PreparedJitsuEvent> {
 	applyAuthoritativeIdentity(request, body, anonymousId);
+	applyConsentContext(body, consent);
 
 	const pageUrl = getEventPageUrl(body);
 	const attribution = buildAvailableAttribution(request, pageUrl, body);
@@ -927,10 +945,25 @@ async function handleJitsuEventRequest(
 	const requestBody = await readJsonObject(request);
 	const payloadAnonymousId = getPayloadAnonymousId(path, requestBody);
 	const identity = resolveAnonymousIdentity(request, tenant, payloadAnonymousId);
-	const cookieHeaders = [...identity.cookieHeaders];
+	const resolvedConsent = await resolveEventConsent(
+		request,
+		env,
+		tenant,
+		identity.anonymousId,
+	);
+	const cookieHeaders = [
+		...identity.cookieHeaders,
+		...resolvedConsent.cookieHeaders,
+	];
 
 	if (path !== JITSU_BATCH_PATH) {
-		const preparedEvent = await prepareJitsuEvent(request, tenant, requestBody, identity.anonymousId);
+		const preparedEvent = await prepareJitsuEvent(
+			request,
+			tenant,
+			requestBody,
+			identity.anonymousId,
+			resolvedConsent.consent,
+		);
 		cookieHeaders.push(...preparedEvent.cookieHeaders);
 
 		if (preparedEvent.suppressUpstream) {
@@ -961,7 +994,13 @@ async function handleJitsuEventRequest(
 			};
 		}
 
-		const preparedEvent = await prepareJitsuEvent(request, tenant, event, identity.anonymousId);
+		const preparedEvent = await prepareJitsuEvent(
+			request,
+			tenant,
+			event,
+			identity.anonymousId,
+			resolvedConsent.consent,
+		);
 		cookieHeaders.push(...preparedEvent.cookieHeaders);
 
 		if (!preparedEvent.suppressUpstream) {
@@ -1033,6 +1072,8 @@ export {
 	corsifyResponse,
 	errorResponse,
 	getAllowedOrigin,
+	getAnonymousIdCookieHeaders,
+	getLocalAnonymousId,
 	getRequestTenant,
 	getString,
 	handleCkRequest,

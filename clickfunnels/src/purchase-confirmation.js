@@ -21,12 +21,15 @@ export const POLL_ON_LOAD_ROUTES = [
   "keyboardrich.com/oto-2-page-1",
   "keyboardrich.com/receipt-1",
   "keyboardrich.com/free-2",
+  "learn.boomingbookkeeping.com/library",
+  "learn.boomingbookkeeping.com/welcome",
 ];
 
 export const POLL_AFTER_SUBMIT_ROUTES = [
   "keyboardrich.com/yes-1",
   "keyboardrich.com/yes-2",
   "learn.boomingbookkeeping.com/offers/*/checkout",
+  "learn.boomingbookkeeping.com/checkout/*",
 ];
 
 var POLL_DELAYS_MS = [0, 1500, 3000, 5000, 8000, 13000, 21000];
@@ -164,12 +167,14 @@ function buildOrderCompletedProperties(charge) {
   });
 
   return {
+    address: charge.address || {},
     event_id: "purchase_" + chargeId,
     order_id: chargeId,
     charge_id: chargeId,
     is_payment_confirmed: true,
     payment_status: "succeeded",
     completion_basis: "stripe_charge_confirmed",
+    payment_source: charge.payment_source || "",
     product_id: charge.product_id || "",
     product_name: charge.product_name || "",
     content_ids: contentIds,

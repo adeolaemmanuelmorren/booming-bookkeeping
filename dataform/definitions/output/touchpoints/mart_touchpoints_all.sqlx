@@ -50,6 +50,13 @@ resolved as (
     partition by sessions.session_id
     order by coalesce(anonymous_profiles.profile_id, user_profiles.profile_id)
   ) = 1
+),
+
+with_fbclid_first_seen as (
+  select
+    resolved.*,
+    min(session_start_timestamp) over (partition by fbclid) as fbclid_first_seen_at
+  from resolved
 )
 
 select
@@ -98,6 +105,14 @@ select
   gbraid,
   wbraid,
   fbclid,
+  case
+    when fbclid is not null and fbclid_first_seen_at is not null then concat(
+      'fb.1.',
+      cast(unix_millis(fbclid_first_seen_at) as string),
+      '.',
+      fbclid
+    )
+  end as fbc_fbclid,
   ttclid,
   li_fat_id,
   rdt_cid,
@@ -110,4 +125,4 @@ select
   channel_source,
   channel_medium,
   profile_id is not null as is_identified
-from resolved
+from with_fbclid_first_seen

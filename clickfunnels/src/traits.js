@@ -1,5 +1,10 @@
 import { GA4_EVENT_CONFIG } from "./config.js";
 import { getUserTraits } from "./analytics-client.js";
+import {
+  findNormalizedPhone,
+  normalizePhoneNumber,
+  normalizePhoneTraits,
+} from "./phone.js";
 import { copyFirstTraitValue, firstAttributionValue, getNestedObject, mergeObjects } from "./utils.js";
 
 export function buildGoogleApiCompliantAttribution(attribution, identity) {
@@ -17,7 +22,9 @@ export function buildGoogleApiCompliantAttribution(attribution, identity) {
     wbraid,
     gbraid,
     email: canIncludeIdentity ? firstAttributionValue(identity, ["email"]) : null,
-    phone: canIncludeIdentity ? firstAttributionValue(identity, ["phone", "phone_number"]) : null,
+    phone: canIncludeIdentity
+      ? normalizePhoneNumber(firstAttributionValue(identity, ["phone", "phone_number"])) || null
+      : null,
     first_name: canIncludeIdentity ? firstAttributionValue(mergeObjects(identity, address), ["first_name", "firstName"]) : null,
     last_name: canIncludeIdentity ? firstAttributionValue(mergeObjects(identity, address), ["last_name", "lastName"]) : null,
   };
@@ -36,7 +43,7 @@ export function buildDataLayerTraits(properties, traits, context) {
 
   var contextTraits = context.traits || {};
   var analyticsTraits = getUserTraits();
-  var output = mergeObjects({}, traits);
+  var output = normalizePhoneTraits(traits);
   var sources = [properties, traits, contextTraits, analyticsTraits];
   var addressSources = [
     properties,
@@ -51,7 +58,11 @@ export function buildDataLayerTraits(properties, traits, context) {
 
   output.address = mergeObjects({}, getNestedObject(traits, "address"));
   copyFirstTraitValue(output, sources, "email", ["email"]);
-  copyFirstTraitValue(output, sources, "phone_number", ["phone_number", "phone", "mobile"]);
+  var phone = findNormalizedPhone(sources);
+  if (phone) {
+    output.phone = phone;
+    output.phone_number = phone;
+  }
   copyFirstTraitValue(output.address, addressSources, "first_name", ["first_name", "firstName"]);
   copyFirstTraitValue(output.address, addressSources, "last_name", ["last_name", "lastName"]);
   copyFirstTraitValue(output.address, addressSources, "street", ["street", "address_line_1", "address1"]);

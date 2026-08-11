@@ -12,6 +12,13 @@ const DEBUG_ENDPOINTS = new Set([
 
 type JsonRecord = Record<string, unknown>;
 
+interface StoredDebugEvent {
+	id: number;
+	endpoint: string;
+	receivedAt: string;
+	propertiesJson: string;
+}
+
 function jsonResponse(data: unknown, status = 200): Response {
 	return new Response(JSON.stringify(data), {
 		status,
@@ -94,4 +101,79 @@ export async function handleDebugWebhook(
 		stored: true,
 		recordId,
 	});
+}
+
+/**
+ * Reads one endpoint/date shard for authenticated audit jobs.
+ *
+ * Route:
+ * - GET /admin/debug-events?endpoint=:endpoint&date=YYYY-MM-DD
+ */
+export async function handleDebugEventQuery(
+	request: Request,
+	runtimeEnv: MarketingWebhookEnv
+): Promise<Response> {
+	if (request.method !== "GET") {
+		return jsonResponse({ error: "Method not allowed" }, 405);
+	}
+
+	const expectedToken = runtimeEnv.DEBUG_QUERY_TOKEN;
+	const authorization = request.headers.get("Authorization");
+
+	if (!expectedToken || authorization !== `Bearer ${expectedToken}`) {
+		return jsonResponse({ error: "Unauthorized" }, 401);
+	}
+
+	const url = new URL(request.url);
+	const endpoint = url.searchParams.get("endpoint");
+	const date = url.searchParams.get("date");
+
+	if (!endpoint || !DEBUG_ENDPOINTS.has(endpoint)) {
+		return jsonResponse({ error: "Unknown debug endpoint" }, 400);
+	}
+
+	if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+		return jsonResponse({ error: "Date must use YYYY-MM-DD" }, 400);
+	}
+
+	const limit = parsePositiveInteger(url.searchParams.get("limit"), 100);
+	const beforeId = parsePositiveInteger(
+		url.searchParams.get("before_id"),
+		undefined
+	);
+	const store = runtimeEnv.REVERSE_ETL_DEBUG_STORE.getByName(
+		`${endpoint}:${date}`
+	);
+	const storedEvents = await store.listEvents(limit, beforeId);
+	const events = storedEvents.map(parseStoredEvent);
+
+	return jsonResponse({
+		ok: true,
+		endpoint,
+		date,
+		count: events.length,
+		events,
+		nextBeforeId: events.at(-1)?.id ?? null,
+	});
+}
+
+function parsePositiveInteger(
+	value: string | null,
+	fallback: number | undefined
+): number | undefined {
+	if (!value) return fallback;
+
+	const parsed = Number.parseInt(value, 10);
+	if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+
+	return parsed;
+}
+
+function parseStoredEvent(event: StoredDebugEvent): Record<string, unknown> {
+	return {
+		id: event.id,
+		endpoint: event.endpoint,
+		receivedAt: event.receivedAt,
+		properties: JSON.parse(event.propertiesJson),
+	};
 }

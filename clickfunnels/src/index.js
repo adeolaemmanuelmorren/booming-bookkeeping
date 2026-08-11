@@ -33,9 +33,14 @@ import {
 } from "./links.js";
 import { loadJitsuAnalytics } from "./jitsu-loader.js";
 import { listenForKajabiPurchaseDataLayerEvents } from "./kajabi-purchase-diagnostic.js";
+import {
+  getConsentContext,
+  startConsentBootstrap,
+} from "./consent.js";
 
 listenForKajabiPurchaseDataLayerEvents();
 loadJitsuAnalytics();
+startConsentBootstrap();
 
 var hasInitialized = false;
 
@@ -91,6 +96,8 @@ window.BoomClickFunnels = {
   createEventId,
   getPageContext,
   loadJitsuAnalytics,
+  startConsentBootstrap,
+  getConsentContext,
   listenForKajabiPurchaseDataLayerEvents,
   sendTrack,
   sendIdentify,

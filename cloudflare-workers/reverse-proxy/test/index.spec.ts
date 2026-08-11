@@ -1,5 +1,6 @@
 import {
 	createExecutionContext,
+	env as workerEnv,
 	waitOnExecutionContext,
 } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +14,8 @@ const TEST_ENV: Env = {
 	STRIPE_SECRET_KEY: "sk_test_main",
 	STRIPE_KAJABI_SECRET_KEY: "sk_test_kajabi",
 	PURCHASE_STATE: {} as DurableObjectNamespace,
+	CONSENT_SECRET: "test-consent-secret-with-32-bytes",
+	CONSENT_SHARD: workerEnv.CONSENT_SHARD,
 };
 
 afterEach(() => {
@@ -389,7 +392,7 @@ describe("routing, validation, and CORS", () => {
 		expect(response.status).toBe(204);
 		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://members.keyboardrichchallenge.com");
 		expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
-		expect(response.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type");
+		expect(response.headers.get("Access-Control-Allow-Headers")).toBe("Content-Type, X-Boom-Consent");
 	});
 
 	it("rejects origins that do not belong to the request tenant", async () => {
@@ -441,10 +444,12 @@ describe("routing, validation, and CORS", () => {
 
 	it("requires both Jitsu configuration values", async () => {
 		const noHost = await runRequest(eventRequest("/api/s/track", { event: "test" }), {
+			...TEST_ENV,
 			JITSU_CLOUD_HOST: "",
 			JITSU_WRITE_KEY: "test-key:test-secret",
 		});
 		const noKey = await runRequest(eventRequest("/api/s/track", { event: "test" }), {
+			...TEST_ENV,
 			JITSU_CLOUD_HOST: "https://test-site.d.jitsu.com",
 			JITSU_WRITE_KEY: "",
 		});
@@ -519,6 +524,13 @@ describe("purchase confirmation endpoints", () => {
 	it("returns the confirmed charge contract from the anonymous ID state", async () => {
 		const poll = vi.fn(async () => ({
 			charges: [{
+				address: {
+					city: "Austin",
+					country: "US",
+					postalCode: "78701",
+					region: "TX",
+					street: "123 Main St",
+				},
 				chargeId: "ch_confirmed123",
 				contentIds: ["authoritative stripe product"],
 				currency: "USD",
@@ -554,11 +566,19 @@ describe("purchase confirmation endpoints", () => {
 		expect(poll).toHaveBeenCalledWith("main");
 		expect(await response.json()).toEqual({
 			charges: [{
+				address: {
+					city: "Austin",
+					country: "US",
+					postal_code: "78701",
+					region: "TX",
+					street: "123 Main St",
+				},
 				charge_id: "ch_confirmed123",
 				content_ids: ["authoritative stripe product"],
 				currency: "USD",
 				email: "person@example.com",
 				name: "Person Example",
+				payment_source: "stripe",
 				phone: "+15555550123",
 				product_id: "authoritative stripe product",
 				product_name: "Authoritative Stripe Product",

@@ -39,6 +39,18 @@ counts as (
   select session_id, count(*) as page_view_count
   from ranked
   group by session_id
+),
+
+meta_ad_lookup as (
+  select
+    campaign_id,
+    adset_id,
+    ad_id
+  from ${ref("stg_facebook_ads")}
+  qualify row_number() over (
+    partition by adset_id, ad_id
+    order by time desc, campaign_id
+  ) = 1
 )
 
 select
@@ -74,7 +86,7 @@ select
   first_events.utm_content,
   first_events.utm_term,
   first_events.utm_id,
-  first_events.campaign_id,
+  coalesce(first_events.campaign_id, meta_ad_lookup.campaign_id) as campaign_id,
   first_events.adset_id,
   first_events.ad_id,
   first_events.google_keyword_id,
@@ -99,3 +111,7 @@ select
 from first_events
 join last_events using (session_id)
 join counts using (session_id)
+left join meta_ad_lookup
+  on first_events.utm_source = 'meta'
+ and first_events.adset_id = meta_ad_lookup.adset_id
+ and first_events.ad_id = meta_ad_lookup.ad_id

@@ -2,6 +2,7 @@ import { getAnonymousId, getUserTraits, identify, track } from "./analytics-clie
 import { getAttrEventProperties } from "./attribution.js";
 import { pushIdentifyToDataLayer, pushTrackToDataLayer } from "./datalayer.js";
 import { buildFacebookContext } from "./facebook-context.js";
+import { normalizePhoneTraits } from "./phone.js";
 import { addGoogleApiCompliantAttribution, buildDataLayerTraits } from "./traits.js";
 import { mergeObjects } from "./utils.js";
 
@@ -22,8 +23,8 @@ export function sendTrack(eventName, properties, traits, context) {
   var facebookContext;
   var options;
 
-  properties = mergeObjects({}, properties);
-  traits = mergeObjects(getUserTraits(), traits);
+  properties = normalizePhoneTraits(properties);
+  traits = normalizePhoneTraits(mergeObjects(getUserTraits(), traits));
   context = mergeObjects(getPageContext(), context);
   facebookContext = buildFacebookContext(eventName, properties);
 
@@ -32,7 +33,7 @@ export function sendTrack(eventName, properties, traits, context) {
   }
 
   if (Object.keys(traits).length) {
-    context.traits = mergeObjects(context.traits, traits);
+    context.traits = normalizePhoneTraits(mergeObjects(context.traits, traits));
   }
 
   context.attribution = addGoogleApiCompliantAttribution(
@@ -51,7 +52,7 @@ export function sendIdentify(userId, traits, context) {
   var anonymousId = getAnonymousId();
   var options;
 
-  traits = mergeObjects(getUserTraits(), traits);
+  traits = normalizePhoneTraits(mergeObjects(getUserTraits(), traits));
   context = mergeObjects(getPageContext(), context);
   options = { context };
 

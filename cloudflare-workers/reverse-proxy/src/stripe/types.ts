@@ -17,7 +17,16 @@ export type ConfirmedProduct = {
 	stripeProductId?: string;
 };
 
+export type ConfirmedAddress = {
+	city: string;
+	country: string;
+	postalCode: string;
+	region: string;
+	street: string;
+};
+
 export type ConfirmedPurchase = {
+	address: ConfirmedAddress;
 	chargeId: string;
 	contentIds: string[];
 	currency: string;

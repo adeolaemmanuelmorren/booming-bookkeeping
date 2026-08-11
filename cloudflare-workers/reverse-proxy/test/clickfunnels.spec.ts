@@ -10,8 +10,17 @@ import {
 } from "../../../clickfunnels/src/active-campaign.js";
 import { sendTrack } from "../../../clickfunnels/src/analytics-track.js";
 import { buildFacebookContext } from "../../../clickfunnels/src/facebook-context.js";
+import {
+	getConsentContext,
+	startConsentBootstrap,
+} from "../../../clickfunnels/src/consent.js";
 import { loadJitsuAnalytics } from "../../../clickfunnels/src/jitsu-loader.js";
 import { listenForKajabiPurchaseDataLayerEvents } from "../../../clickfunnels/src/kajabi-purchase-diagnostic.js";
+import { pushIdentifyToDataLayer } from "../../../clickfunnels/src/datalayer.js";
+import {
+	normalizePhoneNumber,
+	normalizePhoneTraits,
+} from "../../../clickfunnels/src/phone.js";
 import {
 	bindFormSubmitTracking,
 	getPaymentMethodId,
@@ -48,6 +57,7 @@ type ScriptStub = {
 type BrowserStub = {
 	window: Record<string, any>;
 	document: Record<string, any>;
+	dispatchWindowEvent: (eventName: string) => void;
 	getCurrentUrl: () => URL;
 	getInsertedScript: () => ScriptStub | null;
 };
@@ -68,6 +78,7 @@ afterEach(() => {
 function createBrowserStub(initialUrl: string, cookie = ""): BrowserStub {
 	let currentUrl = new URL(initialUrl);
 	let insertedScript: ScriptStub | null = null;
+	const eventListeners = new Map<string, Array<() => void>>();
 
 	const location = {
 		get href() {
@@ -122,6 +133,8 @@ function createBrowserStub(initialUrl: string, cookie = ""): BrowserStub {
 	const windowStub = {
 		location,
 		console: { warn: vi.fn() },
+		dataLayer: [] as Array<Record<string, unknown>>,
+		navigator: { globalPrivacyControl: false },
 		history: {
 			state: null,
 			replaceState(_state: unknown, _title: string, nextUrl: string) {
@@ -129,8 +142,15 @@ function createBrowserStub(initialUrl: string, cookie = ""): BrowserStub {
 			},
 		},
 		fetch: vi.fn(async () => new Response("{}")),
+		addEventListener(eventName: string, listener: () => void) {
+			const listeners = eventListeners.get(eventName) ?? [];
+			listeners.push(listener);
+			eventListeners.set(eventName, listeners);
+		},
 		setInterval,
 		clearInterval,
+		setTimeout,
+		clearTimeout,
 	};
 
 	vi.stubGlobal("window", windowStub);
@@ -139,6 +159,11 @@ function createBrowserStub(initialUrl: string, cookie = ""): BrowserStub {
 	return {
 		window: windowStub,
 		document: documentStub,
+		dispatchWindowEvent(eventName: string) {
+			for (const listener of eventListeners.get(eventName) ?? []) {
+				listener();
+			}
+		},
 		getCurrentUrl: () => currentUrl,
 		getInsertedScript: () => insertedScript,
 	};
@@ -194,15 +219,25 @@ describe("ClickFunnels Jitsu bootstrap", () => {
 		});
 
 		expect(browser.window.jitsuConfig.debug).toBe(true);
-		expect(browser.window.fetch).toHaveBeenCalledWith(
-			"https://sg.thebookkeepingchallenge.com/api/s/track",
-			 expect.objectContaining({
-				method: "POST",
-				credentials: "include",
-				keepalive: true,
-				headers: { "Content-Type": "application/json" },
-			}),
-		);
+		const fetchCall = browser.window.fetch.mock.calls[0];
+		const options = fetchCall[1];
+		const headers = new Headers(options.headers);
+
+		expect(fetchCall[0]).toBe("https://sg.thebookkeepingchallenge.com/api/s/track");
+		expect(options).toMatchObject({
+			method: "POST",
+			credentials: "include",
+			keepalive: true,
+		});
+		expect(headers.get("Content-Type")).toBe("application/json");
+		expect(JSON.parse(headers.get("X-Boom-Consent") ?? "")).toEqual({
+			preferences: null,
+			statistics: null,
+			marketing: null,
+			responseStatus: "unknown",
+			revision: 0,
+			policyVersion: "v1",
+		});
 	});
 
 	it("queues analytics calls until Jitsu is ready", () => {
@@ -287,6 +322,246 @@ describe("ClickFunnels Jitsu bootstrap", () => {
 
 		expect(callback).not.toHaveBeenCalled();
 		expect(browser.window.console.warn).toHaveBeenCalledWith("jitsu_ready_timeout");
+	});
+});
+
+describe("Cookiebot consent bootstrap", () => {
+	it("loads Cookiebot normally when no shared choice exists", async () => {
+		const browser = createBrowserStub(
+			"https://thebookkeepingchallenge.com/offer",
+			"__eventn_id=anonymous-consent-123",
+		);
+		browser.window.fetch.mockResolvedValue(jsonResponse({
+			status: "no_record",
+			consent: null,
+		}));
+
+		await startConsentBootstrap();
+
+		expect(browser.window.fetch).toHaveBeenCalledTimes(1);
+		expect(browser.window.fetch.mock.calls[0][0]).toBe(
+			"https://sg.thebookkeepingchallenge.com/consent/bootstrap",
+		);
+		expect(browser.window.dataLayer).toContainEqual({
+			event: "cookiebot_bootstrap_ready",
+			anonymous_id: "anonymous-consent-123",
+		});
+		expect(getConsentContext()).toMatchObject({
+			responseStatus: "unknown",
+			statistics: null,
+			marketing: null,
+		});
+	});
+
+	it("imports an explicit opt-out without saving it again", async () => {
+		const browser = createBrowserStub(
+			"https://keyboardrich.com/offer?ajs_aid=shared-identity",
+		);
+		browser.window.fetch.mockResolvedValue(jsonResponse({
+			status: "explicit",
+			consent: {
+				preferences: false,
+				statistics: false,
+				marketing: false,
+				gpcApplied: false,
+				revision: 4,
+				policyVersion: "v1",
+			},
+		}));
+
+		await startConsentBootstrap();
+
+		const submitCustomConsent = vi.fn();
+		browser.window.Cookiebot = {
+			hasResponse: true,
+			consent: {
+				preferences: false,
+				statistics: false,
+				marketing: false,
+			},
+			submitCustomConsent,
+		};
+
+		browser.dispatchWindowEvent("CookiebotOnDialogInit");
+		browser.dispatchWindowEvent("CookiebotOnConsentReady");
+
+		expect(submitCustomConsent).toHaveBeenCalledWith(false, false, false);
+		expect(browser.window.fetch).toHaveBeenCalledTimes(1);
+		expect(getConsentContext()).toMatchObject({
+			responseStatus: "explicit",
+			revision: 4,
+			statistics: false,
+			marketing: false,
+		});
+	});
+
+	it("saves a new local Cookiebot choice", async () => {
+		const browser = createBrowserStub("https://boomingbookkeeping.com/offer");
+		browser.window.fetch.mockImplementation(async (input: string) => {
+			if (String(input).endsWith("/consent/bootstrap")) {
+				return jsonResponse({ status: "no_record", consent: null });
+			}
+
+			return jsonResponse({
+				status: "saved",
+				consent: { revision: 1 },
+			});
+		});
+
+		await startConsentBootstrap();
+
+		browser.window.Cookiebot = {
+			hasResponse: true,
+			consent: {
+				preferences: true,
+				statistics: true,
+				marketing: true,
+			},
+		};
+		browser.dispatchWindowEvent("CookiebotOnConsentReady");
+
+		await vi.waitFor(() => {
+			expect(getConsentContext().revision).toBe(1);
+		});
+
+		const saveCall = browser.window.fetch.mock.calls[1];
+		const saveBody = JSON.parse(String(saveCall[1].body));
+
+		expect(saveCall[0]).toBe(
+			"https://sg.boomingbookkeeping.com/consent/state",
+		);
+		expect(saveBody).toMatchObject({
+			preferences: true,
+			statistics: true,
+			marketing: true,
+			gpcApplied: false,
+			policyVersion: "v1",
+		});
+		expect(getConsentContext()).toMatchObject({
+			responseStatus: "explicit",
+			revision: 1,
+		});
+	});
+
+	it("does not let an imported opt-in override active GPC", async () => {
+		const browser = createBrowserStub("https://keyboardrichchallenge.com/offer");
+		browser.window.navigator.globalPrivacyControl = true;
+		browser.window.fetch.mockImplementation(async (input: string) => {
+			if (String(input).endsWith("/consent/bootstrap")) {
+				return jsonResponse({
+					status: "explicit",
+					consent: {
+						preferences: true,
+						statistics: true,
+						marketing: true,
+						gpcApplied: false,
+						revision: 2,
+						policyVersion: "v1",
+					},
+				});
+			}
+
+			return jsonResponse({
+				status: "saved",
+				consent: { revision: 3 },
+			});
+		});
+
+		await startConsentBootstrap();
+
+		const submitCustomConsent = vi.fn();
+		browser.window.Cookiebot = {
+			hasResponse: true,
+			consent: {
+				preferences: true,
+				statistics: true,
+				marketing: false,
+			},
+			submitCustomConsent,
+		};
+
+		browser.dispatchWindowEvent("CookiebotOnDialogInit");
+		browser.dispatchWindowEvent("CookiebotOnConsentReady");
+
+		await vi.waitFor(() => {
+			expect(getConsentContext().revision).toBe(3);
+		});
+
+		const saveBody = JSON.parse(String(
+			browser.window.fetch.mock.calls[1][1].body,
+		));
+
+		expect(submitCustomConsent).toHaveBeenCalledWith(true, true, false);
+		expect(saveBody).toMatchObject({
+			preferences: true,
+			statistics: true,
+			marketing: false,
+			gpcApplied: true,
+		});
+		expect(getConsentContext()).toMatchObject({
+			responseStatus: "gpc",
+			revision: 3,
+		});
+	});
+
+	it("retries a consent save after a temporary failure", async () => {
+		const browser = createBrowserStub("https://boomingbookkeeping.com/offer");
+		let stateAttempts = 0;
+		browser.window.fetch.mockImplementation(async (input: string) => {
+			if (String(input).endsWith("/consent/bootstrap")) {
+				return jsonResponse({ status: "no_record", consent: null });
+			}
+
+			stateAttempts += 1;
+			if (stateAttempts === 1) {
+				return jsonResponse({ error: "temporary" }, 503);
+			}
+
+			return jsonResponse({
+				status: "saved",
+				consent: { revision: 1 },
+			});
+		});
+
+		await startConsentBootstrap();
+
+		browser.window.Cookiebot = {
+			hasResponse: true,
+			consent: {
+				preferences: false,
+				statistics: false,
+				marketing: false,
+			},
+		};
+		browser.dispatchWindowEvent("CookiebotOnConsentReady");
+
+		await vi.waitFor(() => {
+			expect(browser.window.console.warn).toHaveBeenCalledWith(
+				"consent_state_failed",
+			);
+		});
+
+		browser.dispatchWindowEvent("CookiebotOnConsentReady");
+
+		await vi.waitFor(() => {
+			expect(getConsentContext().revision).toBe(1);
+		});
+		expect(stateAttempts).toBe(2);
+	});
+
+	it("still releases the Cookiebot tag when bootstrap fails", async () => {
+		const browser = createBrowserStub("https://thebookkeepingchallenge.com/offer");
+		browser.window.fetch.mockRejectedValue(new Error("offline"));
+
+		await startConsentBootstrap();
+
+		expect(browser.window.dataLayer).toContainEqual({
+			event: "cookiebot_bootstrap_ready",
+			anonymous_id: "",
+		});
+		expect(browser.window.console.warn).toHaveBeenCalledWith(
+			"consent_bootstrap_failed",
+		);
 	});
 });
 
@@ -523,6 +798,18 @@ describe("confirmed browser purchases", () => {
 			hostname: "learn.boomingbookkeeping.com",
 			pathname: "/offers/v3WtGzPH/checkout",
 		})).toBe(true);
+		expect(matchesPurchaseRoute(POLL_AFTER_SUBMIT_ROUTES, {
+			hostname: "learn.boomingbookkeeping.com",
+			pathname: "/checkout/cfa7be40-1e04-46c2-a8b4-c9e8c3df23b7",
+		})).toBe(true);
+		expect(matchesPurchaseRoute(POLL_ON_LOAD_ROUTES, {
+			hostname: "learn.boomingbookkeeping.com",
+			pathname: "/library",
+		})).toBe(true);
+		expect(matchesPurchaseRoute(POLL_ON_LOAD_ROUTES, {
+			hostname: "learn.boomingbookkeeping.com",
+			pathname: "/welcome",
+		})).toBe(true);
 		expect(matchesPurchaseRoute(POLL_ON_LOAD_ROUTES, {
 			hostname: "keyboardrich.com",
 			pathname: "/unrelated-page",
@@ -573,6 +860,13 @@ describe("confirmed browser purchases", () => {
 		browser.window.jitsu = jitsu;
 		browser.window.fetch = vi.fn(async () => jsonResponse({
 			charges: [{
+				address: {
+					city: "Austin",
+					country: "US",
+					postal_code: "78701",
+					region: "TX",
+					street: "123 Main St",
+				},
 				charge_id: "ch_confirmed123",
 				content_ids: [
 					"keyboard rich book",
@@ -581,6 +875,7 @@ describe("confirmed browser purchases", () => {
 				currency: "USD",
 				email: "person@example.com",
 				name: "Person Example",
+				payment_source: "stripe",
 				phone: "+15555550123",
 				product_id: "keyboard rich book",
 				product_name: "Keyboard Rich Book, Domestic Shipping",
@@ -606,12 +901,20 @@ describe("confirmed browser purchases", () => {
 		expect(jitsu.track).toHaveBeenCalledWith(
 			"Order Completed",
 			expect.objectContaining({
+				address: {
+					city: "Austin",
+					country: "US",
+					postal_code: "78701",
+					region: "TX",
+					street: "123 Main St",
+				},
 				event_id: "purchase_ch_confirmed123",
 				order_id: "ch_confirmed123",
 				charge_id: "ch_confirmed123",
 				is_payment_confirmed: true,
 				payment_status: "succeeded",
 				completion_basis: "stripe_charge_confirmed",
+				payment_source: "stripe",
 				content_ids: [
 					"keyboard rich book",
 					"domestic shipping",
@@ -672,6 +975,15 @@ describe("confirmed browser purchases", () => {
 		expect(dataLayerEvent.context.fb.contents).toEqual(
 			dataLayerEvent.properties.fb_contents,
 		);
+		expect(dataLayerEvent.traits.address).toEqual({
+			city: "Austin",
+			country: "US",
+			postal_code: "78701",
+			region: "TX",
+			street: "123 Main St",
+		});
+		expect(dataLayerEvent.traits.phone).toBe("+15555550123");
+		expect(dataLayerEvent.traits.phone_number).toBe("+15555550123");
 	});
 });
 
@@ -694,7 +1006,7 @@ describe("Facebook conversion context", () => {
 				"vip basic package (view q&a only)",
 			],
 			content_name: "Keyboard Rich Book, Domestic Shipping",
-			content_type: "product",
+			content_type: "krc-paid-vip",
 			value: 54.95,
 			currency: "USD",
 		});
@@ -714,6 +1026,77 @@ describe("Facebook conversion context", () => {
 		expect(context.content_ids).toEqual([
 			"booming bookkeeping mentorship program (3 payments of $1,997)",
 		]);
+	});
+
+	it.each([
+		"VIP Basic Package (View Q&A Only) - August 3rd",
+		"Keyboard Rich Challenge Basic VIP (View-only Access to Q&A Sessions)",
+		"5-Day Keyboard Rich Challenge VIP Ticket - August 3rd",
+		"KRC - Basic VIP",
+	])("uses the existing Meta content type for KRC Paid VIP: %s", (contentId) => {
+		const context = buildFacebookContext("Order Completed", {
+			content_ids: [contentId],
+			product_name: contentId,
+			value: 47,
+			currency: "USD",
+		});
+
+		expect(context.content_type).toBe("krc-paid-vip");
+	});
+
+	it("does not classify an unrelated $47 product as KRC Paid VIP", () => {
+		const context = buildFacebookContext("Order Completed", {
+			content_ids: ["Top Tax Loopholes for Bookkeeping Business Owners"],
+			product_name: "Top Tax Loopholes for Bookkeeping Business Owners",
+			value: 47,
+			currency: "USD",
+		});
+
+		expect(context.content_type).toBe("product");
+	});
+
+	it.each([
+		["Booming Bookkeeping Mentorship Program (Deposit)", 1000],
+		["Booming Bookkeeping Mentorship Program (One-Time Payment)", 5991],
+		["Booming Bookkeeping Mentorship Program (3 payments of $1,997)", 1997],
+		["Booming Bookkeeping Installment", 4997],
+	])("uses one Meta content type for main-Stripe high-ticket purchases: %s", (
+		contentId,
+		value,
+	) => {
+		const context = buildFacebookContext("Order Completed", {
+			content_ids: [contentId],
+			payment_source: "stripe",
+			product_name: contentId,
+			value,
+			currency: "USD",
+		});
+
+		expect(context.content_type).toBe("bbb-high-ticket");
+	});
+
+	it("does not classify the Kajabi mentorship subscription as high ticket", () => {
+		const context = buildFacebookContext("Order Completed", {
+			content_ids: ["Booming Bookkeeping Mentorship Program"],
+			payment_source: "stripe_kajabi",
+			product_name: "Booming Bookkeeping Mentorship Program",
+			value: 49,
+			currency: "USD",
+		});
+
+		expect(context.content_type).toBe("product");
+	});
+
+	it("does not classify a partial custom installment as high ticket", () => {
+		const context = buildFacebookContext("Order Completed", {
+			content_ids: ["Booming Bookkeeping Installment"],
+			payment_source: "stripe",
+			product_name: "Booming Bookkeeping Installment",
+			value: 1000,
+			currency: "USD",
+		});
+
+		expect(context.content_type).toBe("product");
 	});
 
 	it("places the same fb context inside Jitsu and dataLayer events", () => {
@@ -757,6 +1140,93 @@ describe("Facebook conversion context", () => {
 });
 
 describe("GA4 ecommerce dataLayer events", () => {
+	it("normalizes phone and phone_number to E.164", () => {
+		expect(normalizePhoneNumber("+1 925-809-0556")).toBe("+19258090556");
+		expect(normalizePhoneNumber("(925) 809-0556")).toBe("+19258090556");
+		expect(normalizePhoneNumber("0044 7700 900123")).toBe("+447700900123");
+		expect(normalizePhoneNumber("+001 765-271-5975")).toBe("+17652715975");
+		expect(normalizePhoneNumber("555-1212")).toBe("");
+		expect(normalizePhoneTraits({ phone: "+1 925-809-0556" })).toMatchObject({
+			phone: "+19258090556",
+			phone_number: "+19258090556",
+		});
+		expect(normalizePhoneTraits({
+			phone_number: "invalid",
+			phone: "+1 925-809-0556",
+		})).toMatchObject({
+			phone: "+19258090556",
+			phone_number: "+19258090556",
+		});
+	});
+
+	it("normalizes phone aliases in browser and Jitsu track events", () => {
+		const browser = createBrowserStub("https://keyboardrichchallenge.com/krc-1");
+		const jitsu = {
+			track: vi.fn(),
+			getState: vi.fn(() => ({ context: { initialized: true } })),
+			on: vi.fn(),
+		};
+
+		browser.window.jitsu = jitsu;
+		sendTrack("Form Submitted", { phone: "+1 925-809-0556" }, {
+			phone_number: "+1 (925) 809-0556",
+		});
+
+		expect(browser.window.dataLayer[0].properties).toMatchObject({
+			phone: "+19258090556",
+			phone_number: "+19258090556",
+		});
+		expect(browser.window.dataLayer[0].traits).toMatchObject({
+			phone: "+19258090556",
+			phone_number: "+19258090556",
+		});
+		expect(jitsu.track.mock.calls[0][1]).toMatchObject({
+			phone: "+19258090556",
+			phone_number: "+19258090556",
+		});
+		expect(jitsu.track.mock.calls[0][2].context.traits).toMatchObject({
+			phone: "+19258090556",
+			phone_number: "+19258090556",
+		});
+	});
+
+	it("adds the existing browser anonymous ID to every track push", () => {
+		const browser = createBrowserStub(
+			"https://keyboardrich.com/receipt-1",
+			"__eventn_id=anonymous-track-123",
+		);
+		browser.window.jitsu = {
+			track: vi.fn(),
+			getState: vi.fn(() => ({ context: { initialized: true } })),
+			on: vi.fn(),
+		};
+
+		sendTrack("Order Completed", {
+			event_id: "purchase_ch_anonymous",
+		});
+
+		expect(browser.window.dataLayer[0]).toMatchObject({
+			event: "Order Completed",
+			anonymous_id: "anonymous-track-123",
+		});
+	});
+
+	it("adds the existing browser anonymous ID to every identify push", () => {
+		const browser = createBrowserStub(
+			"https://keyboardrich.com/free-1",
+			"__eventn_id=anonymous-identify-123",
+		);
+
+		pushIdentifyToDataLayer("person@example.com", {
+			email: "person@example.com",
+		});
+
+		expect(browser.window.dataLayer[0]).toMatchObject({
+			event: "identify",
+			anonymous_id: "anonymous-identify-123",
+		});
+	});
+
 	it("adds purchase ecommerce fields to the existing Order Completed push", () => {
 		const browser = createBrowserStub("https://keyboardrich.com/receipt-1");
 		browser.window.jitsu = {
@@ -786,7 +1256,7 @@ describe("GA4 ecommerce dataLayer events", () => {
 			ga4_event: "purchase",
 			ga4_event_type: "ecommerce",
 			ecommerce: {
-				transaction_id: "ch_ga4test",
+				transaction_id: "purchase_ch_ga4test",
 				value: 47,
 				currency: "USD",
 				items: [{

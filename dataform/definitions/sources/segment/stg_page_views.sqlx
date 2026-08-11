@@ -112,9 +112,11 @@ source as (
     nullif(trim(context_attribution_uetvid), '') as uetvid,
     ${urlParameter("url", "gc_id")} as google_campaign_id,
     ${urlParameter("url", "h_ga_id")} as google_ad_group_id,
-    ${urlParameter("url", "h_ad_id")} as google_ad_id,
+    -- h_ad_id is used by both the Google and Meta URL templates.
+    ${urlParameter("url", "h_ad_id")} as h_ad_id,
     ${urlParameter("url", "h_keyword_id")} as google_keyword_id,
     ${urlParameter("url", "h_keyword")} as google_keyword,
+    ${urlParameter("url", "fbc_id")} as meta_adset_id,
     source_partition_time
   from raw_events
   qualify row_number() over (
@@ -145,17 +147,18 @@ normalized as (
 )
 
 select
-  * except (raw_utm_source, raw_utm_medium),
+  * except (raw_utm_source, raw_utm_medium, h_ad_id),
   nullif(lower(trim(raw_utm_medium)), '') as utm_medium,
   concat(coalesce(page_path, ''), coalesce(page_host, '')) as page_path_host,
+  case when utm_source = 'google' then h_ad_id end as google_ad_id,
   case
     when utm_source = 'meta' then coalesce(utm_campaign, utm_id)
     when utm_source = 'google' then google_campaign_id
   end as campaign_id,
-  case when utm_source = 'meta' then utm_term
+  case when utm_source = 'meta' then coalesce(utm_term, meta_adset_id)
        when utm_source = 'google' then google_ad_group_id end as adset_id,
-  case when utm_source = 'meta' then utm_content
-       when utm_source = 'google' then google_ad_id end as ad_id,
+  case when utm_source = 'meta' then coalesce(utm_content, h_ad_id)
+       when utm_source = 'google' then h_ad_id end as ad_id,
   case
     when gclid is not null then gclid
     when gbraid is not null then gbraid

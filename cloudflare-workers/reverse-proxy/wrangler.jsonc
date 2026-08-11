@@ -22,12 +22,20 @@
 				"name": "PURCHASE_STATE",
 				"class_name": "PurchaseState",
 			},
+			{
+				"name": "CONSENT_SHARD",
+				"class_name": "ConsentShard",
+			},
 		],
 	},
 	"migrations": [
 		{
 			"tag": "v1-purchase-state",
 			"new_sqlite_classes": ["PurchaseState"],
+		},
+		{
+			"tag": "v2-consent-shard",
+			"new_sqlite_classes": ["ConsentShard"],
 		},
 	],
 	"routes": [

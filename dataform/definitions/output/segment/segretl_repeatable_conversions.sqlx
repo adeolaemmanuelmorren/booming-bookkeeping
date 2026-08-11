@@ -71,6 +71,14 @@ classified_payments as (
       )
         then 'vip'
       when payment_source = 'stripe'
+        and amount_paid = 4997
+        and exists (
+          select 1
+          from unnest(conversion_content_ids) content_id
+          where content_id = 'booming bookkeeping installment'
+        )
+        then 'mentorship'
+      when payment_source = 'stripe'
         and exists (
           select 1
           from unnest(conversion_content_ids) content_id
@@ -99,7 +107,25 @@ payment_events as (
   select
     *,
     product_complete_name as content_name,
-    'product' as content_type,
+    -- Keep this aligned with:
+    -- clickfunnels/src/facebook-context.js PURCHASE_CONTENT_TYPE_RULES.
+    -- Meta already uses krc-paid-vip for campaign and ad-set optimization.
+    -- Main-Stripe mentorship orders share one high-ticket content type while
+    -- the separately classified Kajabi subscription remains a regular product.
+    case
+      when exists (
+        select 1
+        from unnest(conversion_content_ids) content_id
+        where regexp_contains(
+          content_id,
+          r'^(vip basic package|keyboard rich challenge basic vip|5-day keyboard rich challenge vip ticket|krc - basic vip)([^a-z0-9]|$)'
+        )
+      )
+        then 'krc-paid-vip'
+      when product_case = 'mentorship'
+        then 'bbb-high-ticket'
+      else 'product'
+    end as content_type,
     amount_paid as value,
     upper(currency) as conversion_currency,
     array_length(conversion_content_ids) as num_items,
@@ -122,10 +148,17 @@ pre_conversion_click_ids as (
   select
     payments.payment_source,
     payments.payment_id,
+    array_agg(touchpoints.anonymous_id ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as anonymous_id,
     array_agg(touchpoints.gclid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as gclid,
     array_agg(touchpoints.wbraid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as wbraid,
     array_agg(touchpoints.gbraid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as gbraid,
     array_agg(touchpoints.fbclid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as fbclid,
+    array_agg(
+      touchpoints.fbc_fbclid
+      ignore nulls
+      order by touchpoints.touchpoint_time desc, touchpoints.touchpoint_id desc
+      limit 1
+    )[safe_offset(0)] as latest_preconversion_fbc_fbclid,
     array_agg(touchpoints.ttclid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as ttclid
   from payment_events payments
   left join ${ref("mart_touchpoints_all")} touchpoints
@@ -134,11 +167,60 @@ pre_conversion_click_ids as (
   group by payments.payment_source, payments.payment_id
 ),
 
+pre_conversion_meta_ids as (
+  select
+    payments.payment_source,
+    payments.payment_id,
+    array_agg(
+      attribution.ip_address
+      ignore nulls
+      order by attribution.event_time desc, attribution.event_id desc
+      limit 1
+    )[safe_offset(0)] as latest_preconversion_ip_address,
+    array_agg(
+      attribution.fbc
+      ignore nulls
+      order by attribution.event_time desc, attribution.event_id desc
+      limit 1
+    )[safe_offset(0)] as latest_preconversion_fbc,
+    array_agg(
+      attribution.fbp
+      ignore nulls
+      order by attribution.event_time desc, attribution.event_id desc
+      limit 1
+    )[safe_offset(0)] as latest_preconversion_fbp
+  from payment_events payments
+  left join ${ref("int_attribution_events")} attribution
+    on attribution.profile_id = payments.profile_id
+   and attribution.event_time <= payments.payment_time
+  group by payments.payment_source, payments.payment_id
+),
+
+matching_browser_purchase_ips as (
+  select
+    payments.payment_source,
+    payments.payment_id,
+    array_agg(
+      browser.ip_address
+      ignore nulls
+      order by browser.completed_at desc, browser.event_row_id desc
+      limit 1
+    )[safe_offset(0)] as browser_purchase_ip_address
+  from payment_events payments
+  left join ${ref("stg_order_completed")} browser
+    on browser.event_id = payments.event_id
+  group by payments.payment_source, payments.payment_id
+),
+
 customer_profiles as (
   select
     profile_id,
     first_name,
-    last_name
+    last_name,
+    (
+      select min(nullif(trim(phone), ''))
+      from unnest(phones) phone
+    ) as phone
   from ${ref("mart_customers")}
 ),
 
@@ -151,11 +233,19 @@ select
   payments.payment_source,
   payments.payment_id,
   payments.profile_id,
+  clicks.anonymous_id,
   payments.event_id,
   'Purchase' as event_name,
   payments.payment_time as conversion_ts,
   payments.payment_email as email,
-  payments.payment_phone as phone,
+  coalesce(payments.payment_phone, profiles.phone) as phone,
+  struct(
+    payments.billing_address_line_1 as address_line_1,
+    coalesce(payments.billing_address_city, traits.first_known_geo_city) as city,
+    coalesce(payments.billing_address_region, traits.first_known_geo_region) as region,
+    payments.billing_address_zip as zip,
+    coalesce(payments.billing_address_country, traits.first_known_geo_country) as country
+  ) as address,
   coalesce(profiles.first_name, split(payments.payment_name, ' ')[safe_offset(0)]) as profile_first_name,
   profiles.last_name as profile_last_name,
   payments.product_case,
@@ -179,6 +269,11 @@ select
     clicks.fbclid as fbclid,
     clicks.ttclid as ttclid
   ) as click_ids,
+  coalesce(
+    meta.latest_preconversion_fbc,
+    clicks.latest_preconversion_fbc_fbclid
+  ) as pre_conversion_fbc,
+  meta.latest_preconversion_fbp as pre_conversion_fbp,
   case
     when clicks.gclid is not null
       or (clicks.gclid is null and clicks.wbraid is null and clicks.gbraid is null)
@@ -187,7 +282,7 @@ select
   case
     when clicks.gclid is not null
       or (clicks.gclid is null and clicks.wbraid is null and clicks.gbraid is null)
-      then payments.payment_phone
+      then coalesce(payments.payment_phone, profiles.phone)
   end as compliant_phone,
   (
     clicks.gclid is not null
@@ -196,6 +291,11 @@ select
     or clicks.fbclid is not null
     or clicks.ttclid is not null
   ) as is_click,
+  coalesce(
+    browser.browser_purchase_ip_address,
+    meta.latest_preconversion_ip_address,
+    '127.0.0.1'
+  ) as pre_conversion_ip_address,
   coalesce(traits.first_known_ip_address, '127.0.0.1') as first_known_ip_address,
   coalesce(traits.last_known_ip_address, '127.0.0.1') as last_known_ip_address,
   coalesce(
@@ -232,10 +332,21 @@ select
     payments.content_name as content_name,
     payments.content_type as content_type,
     payments.value as value,
-    payments.conversion_currency as currency
+    payments.conversion_currency as currency,
+    struct(
+      payments.billing_address_line_1 as address_line_1,
+      coalesce(payments.billing_address_city, traits.first_known_geo_city) as city,
+      coalesce(payments.billing_address_region, traits.first_known_geo_region) as region,
+      payments.billing_address_zip as zip,
+      coalesce(payments.billing_address_country, traits.first_known_geo_country) as country
+    ) as address
   ) as payload
 from payment_events payments
 left join pre_conversion_click_ids clicks
+  using (payment_source, payment_id)
+left join pre_conversion_meta_ids meta
+  using (payment_source, payment_id)
+left join matching_browser_purchase_ips browser
   using (payment_source, payment_id)
 left join customer_profiles profiles
   using (profile_id)

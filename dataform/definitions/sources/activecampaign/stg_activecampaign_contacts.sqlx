@@ -11,8 +11,8 @@ select
   nullif(trim(first_name), '') as first_name,
   nullif(trim(last_name), '') as last_name,
   nullif(trim(concat(coalesce(first_name, ''), ' ', coalesce(last_name, ''))), '') as full_name,
-  c_date as contact_created_at,
-  u_date as contact_updated_at,
+  timestamp(created_utc_timestamp) as contact_created_at,
+  _fivetran_synced as contact_updated_at,
   coalesce(_fivetran_deleted, false) as is_deleted
 from `able-folio-499722.activecampaign.contact`
 qualify row_number() over (

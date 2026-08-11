@@ -14,6 +14,14 @@ import {
 	resolveAnonymousIdentity,
 	type Env,
 } from './jitsu-proxy';
+import { ConsentShard } from './consent/consent-shard';
+import {
+	CONSENT_BOOTSTRAP_PATH,
+	CONSENT_STATE_PATH,
+	handleConsentBootstrap,
+	handleConsentState,
+	isConsentPath,
+} from './consent/routes';
 import { PurchaseState } from './stripe/purchase-state';
 import {
 	PURCHASE_ATTEMPT_PATH,
@@ -23,10 +31,12 @@ import {
 	isStripePurchasePath,
 } from './stripe/routes';
 
-export { PurchaseState };
+export { ConsentShard, PurchaseState };
 
 function isPublicPath(path: string): boolean {
-	return isJitsuWorkerPath(path) || isStripePurchasePath(path);
+	return isJitsuWorkerPath(path) ||
+		isStripePurchasePath(path) ||
+		isConsentPath(path);
 }
 
 export default {
@@ -72,6 +82,16 @@ export default {
 
 			if (request.method !== 'POST') {
 				throw new HttpError(405, 'Method not allowed');
+			}
+
+			if (path === CONSENT_BOOTSTRAP_PATH) {
+				response = await handleConsentBootstrap(request, env, tenant);
+				return corsifyResponse(response, allowedOrigin);
+			}
+
+			if (path === CONSENT_STATE_PATH) {
+				response = await handleConsentState(request, env, tenant);
+				return corsifyResponse(response, allowedOrigin);
 			}
 
 			if (path === PURCHASE_ATTEMPT_PATH) {

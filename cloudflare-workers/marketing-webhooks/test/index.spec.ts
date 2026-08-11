@@ -133,6 +133,47 @@ describe("Reverse ETL debug endpoints", () => {
 				}),
 			}),
 		]);
+
+		const runtimeConfig = env as typeof env & {
+			DEBUG_QUERY_TOKEN?: string;
+		};
+		const queryToken = runtimeConfig.DEBUG_QUERY_TOKEN;
+		expect(queryToken).toBeTruthy();
+
+		const queryResponse = await SELF.fetch(
+			`https://example.com/admin/debug-events?endpoint=purchases-vip&date=${date}`,
+			{
+				headers: {
+					Authorization: `Bearer ${queryToken}`,
+				},
+			}
+		);
+		const queryBody = await queryResponse.json();
+
+		expect(queryResponse.status).toBe(200);
+		expect(queryBody).toMatchObject({
+			ok: true,
+			endpoint: "purchases-vip",
+			date,
+			count: 1,
+			events: [
+				expect.objectContaining({
+					id: responseBody.recordId,
+					properties: {
+						event_id: "purchase_ch_test",
+						product_case: "vip",
+					},
+				}),
+			],
+		});
+	});
+
+	it("protects stored debug events from unauthenticated reads", async () => {
+		const response = await SELF.fetch(
+			"https://example.com/admin/debug-events?endpoint=purchases-all&date=2026-07-28"
+		);
+
+		expect(response.status).toBe(401);
 	});
 
 	it("rejects unknown debug endpoints", async () => {

@@ -37,7 +37,19 @@ describe("Stripe charge confirmation", () => {
 				{
 					id: "ch_book",
 					amount: 795,
-					billing_details: { email: "person@example.com" },
+					billing_details: {
+						address: {
+							city: "Austin",
+							country: "US",
+							line1: "123 Main St",
+							postal_code: "78701",
+							state: "TX",
+						},
+						email: "person@example.com",
+					},
+					customer: {
+						shipping: { phone: "+15555550123" },
+					},
 					calculated_statement_descriptor: "KEYBOARD RICH BOOK",
 					currency: "usd",
 					created: 1010,
@@ -72,9 +84,17 @@ describe("Stripe charge confirmation", () => {
 
 		expect(purchases).toEqual([
 			expect.objectContaining({
+				address: {
+					city: "Austin",
+					country: "US",
+					postalCode: "78701",
+					region: "TX",
+					street: "123 Main St",
+				},
 				chargeId: "ch_book",
 				contentIds: ["keyboard rich book", "domestic shipping"],
 				productName: "Keyboard Rich Book, Domestic Shipping",
+				phone: "+15555550123",
 				value: 7.95,
 			}),
 			expect.objectContaining({
@@ -412,6 +432,13 @@ describe("Durable Object replay prevention", () => {
 		const state = env.PURCHASE_STATE.getByName(`purchase-test-${crypto.randomUUID()}`);
 		const now = Date.now();
 		const charge: ConfirmedPurchase = {
+			address: {
+				city: "",
+				country: "",
+				postalCode: "",
+				region: "",
+				street: "",
+			},
 			chargeId: "ch_once",
 			contentIds: ["test product"],
 			currency: "USD",

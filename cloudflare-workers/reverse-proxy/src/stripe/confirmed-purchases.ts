@@ -1,4 +1,5 @@
 import type {
+	ConfirmedAddress,
 	ConfirmedProduct,
 	ConfirmedPurchase,
 	PurchaseAttemptInput,
@@ -444,7 +445,28 @@ function getCustomerName(charge: StripeObject): string {
 }
 
 function getCustomerPhone(charge: StripeObject): string {
-	return getString(getObject(charge.billing_details)?.phone);
+	const billingDetails = getObject(charge.billing_details);
+	const chargeShipping = getObject(charge.shipping);
+	const customer = getObject(charge.customer);
+	const customerShipping = getObject(customer?.shipping);
+
+	return getString(billingDetails?.phone) ||
+		getString(chargeShipping?.phone) ||
+		getString(customer?.phone) ||
+		getString(customerShipping?.phone);
+}
+
+function getBillingAddress(charge: StripeObject): ConfirmedAddress {
+	const billingDetails = getObject(charge.billing_details);
+	const address = getObject(billingDetails?.address);
+
+	return {
+		city: getString(address?.city),
+		country: getString(address?.country),
+		postalCode: getString(address?.postal_code),
+		region: getString(address?.state),
+		street: getString(address?.line1),
+	};
 }
 
 function toConfirmedPurchase(
@@ -467,6 +489,7 @@ function toConfirmedPurchase(
 	}
 
 	return {
+		address: getBillingAddress(enriched.charge),
 		chargeId,
 		contentIds: products.map((product) => product.contentId),
 		currency,

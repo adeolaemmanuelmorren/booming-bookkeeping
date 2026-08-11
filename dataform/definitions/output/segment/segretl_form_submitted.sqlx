@@ -51,15 +51,44 @@ with mapped_form_submissions as (
 pre_conversion_click_ids as (
   select
     forms.event_id,
+    array_agg(touchpoints.anonymous_id ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as anonymous_id,
     array_agg(touchpoints.gclid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as gclid,
     array_agg(touchpoints.wbraid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as wbraid,
     array_agg(touchpoints.gbraid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as gbraid,
     array_agg(touchpoints.fbclid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as fbclid,
+    array_agg(
+      touchpoints.fbc_fbclid
+      ignore nulls
+      order by touchpoints.touchpoint_time desc, touchpoints.touchpoint_id desc
+      limit 1
+    )[safe_offset(0)] as latest_preconversion_fbc_fbclid,
     array_agg(touchpoints.ttclid ignore nulls order by touchpoints.touchpoint_time desc)[safe_offset(0)] as ttclid
   from mapped_form_submissions forms
   left join ${ref("mart_touchpoints_all")} touchpoints
     on touchpoints.profile_id = forms.profile_id
    and touchpoints.touchpoint_time <= forms.conversion_ts
+  group by forms.event_id
+),
+
+pre_conversion_meta_ids as (
+  select
+    forms.event_id,
+    array_agg(
+      attribution.fbc
+      ignore nulls
+      order by attribution.event_time desc, attribution.event_id desc
+      limit 1
+    )[safe_offset(0)] as latest_preconversion_fbc,
+    array_agg(
+      attribution.fbp
+      ignore nulls
+      order by attribution.event_time desc, attribution.event_id desc
+      limit 1
+    )[safe_offset(0)] as latest_preconversion_fbp
+  from mapped_form_submissions forms
+  left join ${ref("int_attribution_events")} attribution
+    on attribution.profile_id = forms.profile_id
+   and attribution.event_time <= forms.conversion_ts
   group by forms.event_id
 ),
 
@@ -70,6 +99,7 @@ attribution_traits as (
 
 select
   forms.profile_id,
+  clicks.anonymous_id,
   forms.form_submission_id,
   forms.contact_id,
   forms.tag_id,
@@ -93,6 +123,11 @@ select
     clicks.fbclid as fbclid,
     clicks.ttclid as ttclid
   ) as click_ids,
+  coalesce(
+    meta.latest_preconversion_fbc,
+    clicks.latest_preconversion_fbc_fbclid
+  ) as pre_conversion_fbc,
+  meta.latest_preconversion_fbp as pre_conversion_fbp,
   case
     when clicks.gclid is not null
       or (clicks.gclid is null and clicks.wbraid is null and clicks.gbraid is null)
@@ -142,6 +177,8 @@ select
   ) as payload
 from mapped_form_submissions forms
 left join pre_conversion_click_ids clicks
+  using (event_id)
+left join pre_conversion_meta_ids meta
   using (event_id)
 left join attribution_traits traits
   using (profile_id)

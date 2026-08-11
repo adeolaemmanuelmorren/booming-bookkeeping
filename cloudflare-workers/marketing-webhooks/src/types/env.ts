@@ -7,6 +7,7 @@ export interface MarketingWebhookRuntimeConfig {
 	ACTIVE_CAMPAIGN_API_URL?: string;
 	ACTIVE_CAMPAIGN_API_TOKEN?: string;
 	ACTIVE_CAMPAIGN_SEGMENT_ANONYMOUS_ID_FIELD_IDS?: string;
+	DEBUG_QUERY_TOKEN?: string;
 	ENABLE_TEST_ENDPOINTS?: string;
 	SEGMENT_WRITE_KEY?: string;
 	SHOPIFY_STORE_DOMAIN?: string;

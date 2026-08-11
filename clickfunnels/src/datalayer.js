@@ -1,3 +1,4 @@
+import { getAnonymousId } from "./analytics-client.js";
 import { buildDataLayerTraits, getGA4EventConfig } from "./traits.js";
 
 function getFiniteNumber(value) {
@@ -63,7 +64,9 @@ function buildGA4PurchaseItems(properties) {
 }
 
 function buildGA4Purchase(properties) {
-  var transactionId = String(properties.order_id || properties.charge_id || "").trim();
+  var transactionId = String(
+    properties.event_id || properties.order_id || properties.charge_id || ""
+  ).trim();
   var value = getFiniteNumber(
     properties.value === undefined ? properties.total : properties.value
   );
@@ -112,6 +115,7 @@ export function pushTrackToDataLayer(eventName, properties, options) {
   var dataLayerEvent = {
     event: eventName,
     event_id: properties.event_id || dataLayerTraits.event_id || "",
+    anonymous_id: getAnonymousId(),
     properties,
     traits: dataLayerTraits,
     context,
@@ -156,5 +160,12 @@ export function pushIdentifyToDataLayer(userIdOrTraits, traitsOrOptions, maybeOp
   window.dataLayer = window.dataLayer || [];
   var context = options.context || {};
   var dataLayerTraits = buildDataLayerTraits({}, traits, context);
-  window.dataLayer.push({ event: "identify", userId, traits: dataLayerTraits, context, segment_type: "identify" });
+  window.dataLayer.push({
+    event: "identify",
+    userId,
+    anonymous_id: getAnonymousId(),
+    traits: dataLayerTraits,
+    context,
+    segment_type: "identify",
+  });
 }
