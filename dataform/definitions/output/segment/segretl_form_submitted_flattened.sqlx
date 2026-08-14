@@ -21,5 +21,6 @@ select
   source.payload.event_name as payload_event_name,
   source.payload.event_id as payload_event_id,
   source.payload.event_time as payload_event_time,
-  source.payload.content_name as payload_content_name
+  source.payload.content_name as payload_content_name,
+  source.payload.content_type as payload_content_type
 from ${ref("segretl_form_submitted")} source

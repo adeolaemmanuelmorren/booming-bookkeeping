@@ -1129,12 +1129,23 @@ describe("Facebook conversion context", () => {
 		expect(jitsuOptions.context.fb).toEqual(dataLayerEvent.context.fb);
 	});
 
-	it("adds a content name to form submissions", () => {
+	it("adds the KRC free-registration content type", () => {
 		expect(buildFacebookContext("Form Submitted", {
+			registration_type: "krc",
 			page_title: "Keyboard Rich Challenge Registration",
 			form_name: "Registration",
 		})).toEqual({
 			content_name: "Keyboard Rich Challenge Registration",
+			content_type: "krc-free",
+		});
+	});
+
+	it("does not add the KRC content type to webinar registrations", () => {
+		expect(buildFacebookContext("Form Submitted", {
+			registration_type: "webinar",
+			content_name: "Booming Bookkeeping Webinar Registration",
+		})).toEqual({
+			content_name: "Booming Bookkeeping Webinar Registration",
 		});
 	});
 });

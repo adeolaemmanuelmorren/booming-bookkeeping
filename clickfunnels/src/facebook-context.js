@@ -138,10 +138,19 @@ function buildFormContext(properties) {
     properties.form_name ||
     "Form Submitted",
   ).trim();
-
-  return {
+  var registrationType = String(
+    properties.registration_type || properties.lead_source || ""
+  ).trim().toLowerCase();
+  var output = {
     content_name: contentName,
   };
+
+  // Keep this aligned with segretl_form_submitted.sqlx.
+  if (registrationType === "krc") {
+    output.content_type = "krc-free";
+  }
+
+  return output;
 }
 
 export function buildFacebookContext(eventName, properties) {
