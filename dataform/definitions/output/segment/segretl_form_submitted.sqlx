@@ -114,6 +114,10 @@ select
   forms.profile_last_name,
   forms.registration_type,
   forms.content_name,
+  -- Keep this aligned with clickfunnels/src/facebook-context.js.
+  case
+    when forms.registration_type = 'krc' then 'krc-free'
+  end as content_type,
   forms.form_type,
   forms.event_source,
   struct(
@@ -173,7 +177,10 @@ select
     'CompleteRegistration' as event_name,
     forms.event_id as event_id,
     forms.conversion_ts as event_time,
-    forms.content_name as content_name
+    forms.content_name as content_name,
+    case
+      when forms.registration_type = 'krc' then 'krc-free'
+    end as content_type
   ) as payload
 from mapped_form_submissions forms
 left join pre_conversion_click_ids clicks

@@ -4,11 +4,12 @@ config {
   tags: ["output", "stripe", "stripe_kajabi", "payments"],
   assertions: {
     uniqueKey: ["payment_source", "payment_id"],
-    nonNull: ["payment_source", "payment_id", "payment_time", "currency", "amount_paid", "product_name", "payment_occurrence_type", "is_repeat_payment"],
+    nonNull: ["payment_source", "payment_id", "payment_time", "currency", "amount_paid", "product_name", "payment_category", "payment_occurrence_type", "is_repeat_payment"],
     rowConditions: [
       "amount_paid >= 0",
       "refund_amount >= 0",
       "net_amount = amount_paid - refund_amount",
+      "payment_category in ('vip', 'book', 'mentorship', 'kajabi', 'catalog', 'unknown')",
     ],
   },
   bigquery: {
@@ -58,6 +59,26 @@ automatically_resolved as (
 
 select
   payments.*,
+  case
+    when payments.payment_source = 'stripe_kajabi' then 'kajabi'
+    when payments.product_rule in (
+      'structured_basic_vip',
+      'structured_keyboard_rich_challenge',
+      'keyboard_rich_challenge_vip'
+    ) then 'vip'
+    when payments.product_rule in (
+      'keyboard_rich_book',
+      'top_tax_loopholes'
+    ) then 'book'
+    when payments.product_rule in (
+      'mentorship_deposit',
+      'mentorship_full_payment',
+      'mentorship_3x1997',
+      'mentorship_balance'
+    ) then 'mentorship'
+    when payments.product_rule = 'catalog_product' then 'catalog'
+    else 'unknown'
+  end as payment_category,
   manual.manual_profile_id,
   coalesce(manual.manual_profile_id, automatic_profile_id) as profile_id,
   case

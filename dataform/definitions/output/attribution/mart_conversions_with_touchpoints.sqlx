@@ -24,6 +24,7 @@ with server_form_events as (
     'server_side' as conversion_source,
     'form_submission' as conversion_type,
     1.0 as form_submissions_server_side,
+    if(registration_type = 'krc', 1.0, 0.0) as krc_registrations_server_side,
     0.0 as form_submissions_client_side,
     0.0 as order_completed_server_side,
     0.0 as order_completed_client_side,
@@ -31,7 +32,21 @@ with server_form_events as (
     0.0 as payments_client_side,
     0.0 as revenue_server_side,
     0.0 as revenue_client_side,
-    0.0 as customers_server_side
+    0.0 as customers_server_side,
+    0.0 as bbb_buyers_server_side,
+    0.0 as bbb_revenue_server_side,
+    0.0 as payments_vip_server_side,
+    0.0 as payments_book_server_side,
+    0.0 as payments_mentorship_server_side,
+    0.0 as payments_kajabi_server_side,
+    0.0 as payments_catalog_server_side,
+    0.0 as payments_unknown_server_side,
+    0.0 as revenue_vip_server_side,
+    0.0 as revenue_book_server_side,
+    0.0 as revenue_mentorship_server_side,
+    0.0 as revenue_kajabi_server_side,
+    0.0 as revenue_catalog_server_side,
+    0.0 as revenue_unknown_server_side
   from ${ref("mart_form_submissions_server_side")}
   where submitted_at is not null
 ),
@@ -44,6 +59,7 @@ client_form_events as (
     'client_side' as conversion_source,
     if(is_checkout_form, 'checkout_form_submission', 'form_submission') as conversion_type,
     0.0 as form_submissions_server_side,
+    0.0 as krc_registrations_server_side,
     1.0 as form_submissions_client_side,
     0.0 as order_completed_server_side,
     0.0 as order_completed_client_side,
@@ -51,7 +67,21 @@ client_form_events as (
     0.0 as payments_client_side,
     0.0 as revenue_server_side,
     0.0 as revenue_client_side,
-    0.0 as customers_server_side
+    0.0 as customers_server_side,
+    0.0 as bbb_buyers_server_side,
+    0.0 as bbb_revenue_server_side,
+    0.0 as payments_vip_server_side,
+    0.0 as payments_book_server_side,
+    0.0 as payments_mentorship_server_side,
+    0.0 as payments_kajabi_server_side,
+    0.0 as payments_catalog_server_side,
+    0.0 as payments_unknown_server_side,
+    0.0 as revenue_vip_server_side,
+    0.0 as revenue_book_server_side,
+    0.0 as revenue_mentorship_server_side,
+    0.0 as revenue_kajabi_server_side,
+    0.0 as revenue_catalog_server_side,
+    0.0 as revenue_unknown_server_side
   from ${ref("mart_form_submissions_client_side")}
   where submitted_at is not null
 ),
@@ -62,7 +92,16 @@ server_payments_ranked as (
     row_number() over (
       partition by coalesce(profile_id, concat(payment_source, ':customer:', customer_id), concat(payment_source, ':payment:', payment_id))
       order by payment_time, payment_id
-    ) as customer_payment_number
+    ) as customer_payment_number,
+    countif(
+      payment_category = 'mentorship'
+      and not is_repeat_payment
+      and net_amount > 900
+    ) over (
+      partition by coalesce(profile_id, concat(payment_source, ':customer:', customer_id), concat(payment_source, ':email:', lower(payment_email)), concat(payment_source, ':payment:', payment_id))
+      order by payment_time, payment_id
+      rows between unbounded preceding and current row
+    ) as bbb_payment_number
   from ${ref("mart_payments")}
   where payment_time is not null
 ),
@@ -75,6 +114,7 @@ server_payment_events as (
     'server_side' as conversion_source,
     if(is_repeat_payment, 'repeat_payment', 'order_completed') as conversion_type,
     0.0 as form_submissions_server_side,
+    0.0 as krc_registrations_server_side,
     0.0 as form_submissions_client_side,
     if(is_repeat_payment, 0.0, 1.0) as order_completed_server_side,
     0.0 as order_completed_client_side,
@@ -82,7 +122,35 @@ server_payment_events as (
     0.0 as payments_client_side,
     cast(net_amount as float64) as revenue_server_side,
     0.0 as revenue_client_side,
-    if(customer_payment_number = 1, 1.0, 0.0) as customers_server_side
+    if(customer_payment_number = 1, 1.0, 0.0) as customers_server_side,
+    if(
+      payment_category = 'mentorship'
+      and not is_repeat_payment
+      and net_amount > 900
+      and bbb_payment_number = 1,
+      1.0,
+      0.0
+    ) as bbb_buyers_server_side,
+    if(
+      payment_category = 'mentorship'
+      and not is_repeat_payment
+      and net_amount > 900
+      and bbb_payment_number = 1,
+      cast(net_amount as float64),
+      0.0
+    ) as bbb_revenue_server_side,
+    if(payment_category = 'vip', 1.0, 0.0) as payments_vip_server_side,
+    if(payment_category = 'book', 1.0, 0.0) as payments_book_server_side,
+    if(payment_category = 'mentorship', 1.0, 0.0) as payments_mentorship_server_side,
+    if(payment_category = 'kajabi', 1.0, 0.0) as payments_kajabi_server_side,
+    if(payment_category = 'catalog', 1.0, 0.0) as payments_catalog_server_side,
+    if(payment_category = 'unknown', 1.0, 0.0) as payments_unknown_server_side,
+    if(payment_category = 'vip', cast(net_amount as float64), 0.0) as revenue_vip_server_side,
+    if(payment_category = 'book', cast(net_amount as float64), 0.0) as revenue_book_server_side,
+    if(payment_category = 'mentorship', cast(net_amount as float64), 0.0) as revenue_mentorship_server_side,
+    if(payment_category = 'kajabi', cast(net_amount as float64), 0.0) as revenue_kajabi_server_side,
+    if(payment_category = 'catalog', cast(net_amount as float64), 0.0) as revenue_catalog_server_side,
+    if(payment_category = 'unknown', cast(net_amount as float64), 0.0) as revenue_unknown_server_side
   from server_payments_ranked
 ),
 
@@ -94,6 +162,7 @@ client_payment_events as (
     'client_side' as conversion_source,
     'order_completed' as conversion_type,
     0.0 as form_submissions_server_side,
+    0.0 as krc_registrations_server_side,
     0.0 as form_submissions_client_side,
     0.0 as order_completed_server_side,
     1.0 as order_completed_client_side,
@@ -101,7 +170,21 @@ client_payment_events as (
     1.0 as payments_client_side,
     0.0 as revenue_server_side,
     cast(coalesce(amount, 0) as float64) as revenue_client_side,
-    0.0 as customers_server_side
+    0.0 as customers_server_side,
+    0.0 as bbb_buyers_server_side,
+    0.0 as bbb_revenue_server_side,
+    0.0 as payments_vip_server_side,
+    0.0 as payments_book_server_side,
+    0.0 as payments_mentorship_server_side,
+    0.0 as payments_kajabi_server_side,
+    0.0 as payments_catalog_server_side,
+    0.0 as payments_unknown_server_side,
+    0.0 as revenue_vip_server_side,
+    0.0 as revenue_book_server_side,
+    0.0 as revenue_mentorship_server_side,
+    0.0 as revenue_kajabi_server_side,
+    0.0 as revenue_catalog_server_side,
+    0.0 as revenue_unknown_server_side
   from ${ref("mart_payments_client_side")}
   where payment_time is not null
 ),

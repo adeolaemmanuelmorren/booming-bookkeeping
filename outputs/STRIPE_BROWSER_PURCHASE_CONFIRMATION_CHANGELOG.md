@@ -1,5 +1,20 @@
 # Stripe Browser Purchase Confirmation Changelog
 
+## August 11, 2026 — KRC free-registration Meta content type
+
+- Added `content_type = krc-free` to browser and server-side KRC
+  `CompleteRegistration` conversions.
+- Webinar registrations and all purchase classifications remain unchanged.
+- Kept the browser and Dataform classification rules explicitly aligned.
+- All 123 Worker and browser tests passed; Dataform compiled all 109 actions.
+- Published browser bundle SHA-256
+  `c132dcaf2ae89c9ca67626e992a5566e28332d887bdbcaf753eefe4576f7b3c0`
+  across all four production asset domains.
+- Published Dataform commit `4660bf7` and completed a successful production
+  full refresh from that exact commit.
+- Warehouse validation returned 874,997 KRC rows with `krc-free` at both the
+  top level and inside `payload`, and 51,218 webinar rows with both fields null.
+
 ## August 8, 2026 — Google purchase transaction IDs aligned
 
 - Changed the browser GA4 ecommerce `transaction_id` to use the canonical
