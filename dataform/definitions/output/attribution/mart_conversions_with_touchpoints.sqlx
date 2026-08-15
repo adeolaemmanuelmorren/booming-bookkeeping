@@ -242,6 +242,18 @@ joined as (
    and ad_names.ad_id is not distinct from touchpoints.ad_id
 ),
 
+classified as (
+  select
+    *,
+    lower(source) = 'direct'
+      and lower(medium) = 'none' as is_direct_touch,
+    lower(source) in ('google', 'meta')
+      and lower(medium) in ('cpc', 'paid', 'paid_social')
+      and campaign_id is not null
+      and ad_id is not null as is_paid_ad_touch
+  from joined
+),
+
 ranked as (
   select
     *,
@@ -249,19 +261,63 @@ ranked as (
     row_number() over (
       partition by conversion_id
       order by coalesce(session_start_timestamp, conversion_time), touchpoint_id
-    ) as touchpoint_number
-  from joined
+    ) as touchpoint_number,
+    countif(not is_direct_touch) over (
+      partition by conversion_id
+    ) as non_direct_touchpoints,
+    countif(not is_direct_touch) over (
+      partition by conversion_id
+      order by coalesce(session_start_timestamp, conversion_time), touchpoint_id
+      rows between unbounded preceding and current row
+    ) as non_direct_touchpoint_number,
+    countif(is_paid_ad_touch) over (
+      partition by conversion_id
+    ) as paid_ad_touchpoints,
+    countif(is_paid_ad_touch) over (
+      partition by conversion_id
+      order by coalesce(session_start_timestamp, conversion_time), touchpoint_id
+      rows between unbounded preceding and current row
+    ) as paid_ad_touchpoint_number
+  from classified
 )
 
 select
   *,
   case
-    when total_touchpoints = 1 then 1.0
-    when total_touchpoints = 2 then 0.5
-    when touchpoint_number = 1 then 0.4
-    when touchpoint_number = total_touchpoints then 0.4
-    else 0.2 / (total_touchpoints - 2)
+    when is_direct_touch then 0.0
+    when non_direct_touchpoints = 1 then 1.0
+    when non_direct_touchpoints = 2 then 0.5
+    when non_direct_touchpoint_number = 1 then 0.4
+    when non_direct_touchpoint_number = non_direct_touchpoints then 0.4
+    else 0.2 / (non_direct_touchpoints - 2)
   end as multi_touch_weight,
-  if(touchpoint_number = 1, 1.0, 0.0) as first_touch_weight,
-  if(touchpoint_number = total_touchpoints, 1.0, 0.0) as last_touch_weight
+  if(
+    not is_direct_touch and non_direct_touchpoint_number = 1,
+    1.0,
+    0.0
+  ) as first_touch_weight,
+  if(
+    not is_direct_touch
+      and non_direct_touchpoint_number = non_direct_touchpoints,
+    1.0,
+    0.0
+  ) as last_touch_weight,
+  case
+    when not is_paid_ad_touch then 0.0
+    when paid_ad_touchpoints = 1 then 1.0
+    when paid_ad_touchpoints = 2 then 0.5
+    when paid_ad_touchpoint_number = 1 then 0.4
+    when paid_ad_touchpoint_number = paid_ad_touchpoints then 0.4
+    else 0.2 / (paid_ad_touchpoints - 2)
+  end as paid_multi_touch_weight,
+  if(
+    is_paid_ad_touch and paid_ad_touchpoint_number = 1,
+    1.0,
+    0.0
+  ) as paid_first_touch_weight,
+  if(
+    is_paid_ad_touch and paid_ad_touchpoint_number = paid_ad_touchpoints,
+    1.0,
+    0.0
+  ) as paid_last_touch_weight
 from ranked

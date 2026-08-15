@@ -1,6 +1,6 @@
 config {
   type: "table",
-  description: "Daily first-, last-, and 40/20/40 multi-touch conversion metrics by acquisition dimensions.",
+  description: "Daily first-, last-, and 40/20/40 conversion metrics, including paid-ad-only attribution weights.",
   tags: ["output", "attribution", "conversions"],
   bigquery: {
     clusterBy: ["source", "campaign_id", "adset_id", "ad_id"],
@@ -63,6 +63,9 @@ select
         `sum(${metric} * multi_touch_weight) as ${metric}_mt`,
         `sum(${metric} * first_touch_weight) as ${metric}_ft`,
         `sum(${metric} * last_touch_weight) as ${metric}_lt`,
+        `sum(${metric} * paid_multi_touch_weight) as ${metric}_paid_mt`,
+        `sum(${metric} * paid_first_touch_weight) as ${metric}_paid_ft`,
+        `sum(${metric} * paid_last_touch_weight) as ${metric}_paid_lt`,
       ])
       .join(",\n  ")
   }

@@ -77,7 +77,7 @@ warehouse_conversions as (
     ${
       metrics
         .flatMap((metric) => ["mt", "ft", "lt"].map(
-          (suffix) => `sum(${metric}_${suffix}) as ${metric}_${suffix}`
+          (suffix) => `sum(${metric}_paid_${suffix}) as ${metric}_${suffix}`
         ))
         .join(",\n    ")
     }
