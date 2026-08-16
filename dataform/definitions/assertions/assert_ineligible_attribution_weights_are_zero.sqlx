@@ -1,13 +1,13 @@
 config {
   type: "assertion",
-  description: "Direct and non-paid touches must not receive ineligible attribution weight.",
+  description: "Later direct returns and non-paid touches must not receive ineligible attribution weight.",
   tags: ["assertion", "attribution"],
 }
 
 select *
 from ${ref("mart_conversions_with_touchpoints")}
 where (
-    is_direct_touch
+    is_excluded_direct_touch
     and (
       multi_touch_weight != 0
       or first_touch_weight != 0
