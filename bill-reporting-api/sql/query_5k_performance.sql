@@ -39,6 +39,7 @@ attribution_rows AS (
     first_touch_adset_id AS adset_id,
     first_touch_ad_id AS ad_id,
     registration_id,
+    is_immediate_vip,
     is_5k_purchaser,
     collected_5k_revenue
   FROM acquisition_with_revenue
@@ -53,6 +54,7 @@ attribution_rows AS (
     last_touch_adset_id AS adset_id,
     last_touch_ad_id AS ad_id,
     registration_id,
+    is_immediate_vip,
     is_5k_purchaser,
     collected_5k_revenue
   FROM acquisition_with_revenue
@@ -67,6 +69,7 @@ attribution_rows AS (
     first_touch_adset_id AS adset_id,
     first_touch_ad_id AS ad_id,
     registration_id,
+    is_immediate_vip,
     is_5k_purchaser,
     collected_5k_revenue
   FROM acquisition_with_revenue
@@ -92,6 +95,13 @@ SELECT
     collected_5k_revenue,
     0
   )) AS last_touch_5k_revenue,
+  COUNT(DISTINCT IF(
+    attribution_method = 'last'
+      AND is_immediate_vip
+      AND is_5k_purchaser,
+    registration_id,
+    NULL
+  )) AS last_touch_immediate_vip_5k_purchasers,
   COUNT(DISTINCT IF(
     attribution_method = 'first' AND is_5k_purchaser,
     registration_id,

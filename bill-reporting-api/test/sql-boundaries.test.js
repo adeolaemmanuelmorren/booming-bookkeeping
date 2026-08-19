@@ -48,3 +48,12 @@ test("$5K revenue includes every collected mentorship payment for each buyer", a
   assert.match(query, /SUM\(payments\.net_amount\) AS collected_revenue/);
   assert.doesNotMatch(query, /first_5k_revenue/);
 });
+
+test("VIP to $5K counts only buyers who were also immediate VIPs", async () => {
+  const query = await readQuery("query_5k_performance.sql");
+
+  assert.match(
+    query,
+    /AND is_immediate_vip\s+AND is_5k_purchaser[\s\S]*AS last_touch_immediate_vip_5k_purchasers/,
+  );
+});

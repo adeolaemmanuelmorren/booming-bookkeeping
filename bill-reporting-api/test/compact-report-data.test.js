@@ -38,6 +38,7 @@ test("compacts shared ad dimensions without losing report rows", () => {
         first_touch_5k_revenue: 5000,
         solo_touch_5k_purchasers: 0,
         solo_touch_5k_revenue: 0,
+        last_touch_immediate_vip_5k_purchasers: 1,
       },
     ],
   });
@@ -45,4 +46,5 @@ test("compacts shared ad dimensions without losing report rows", () => {
   assert.equal(result.adDimensions.length, 1);
   assert.equal(result.liveRows[0][1], "0");
   assert.equal(result.fiveKRows[0][1], "0");
+  assert.equal(result.fiveKRows[0][8], 1);
 });

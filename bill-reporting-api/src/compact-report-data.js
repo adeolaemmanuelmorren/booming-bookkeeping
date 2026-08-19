@@ -49,6 +49,7 @@ export function compactReportData(reportData) {
     row.first_touch_5k_revenue,
     row.solo_touch_5k_purchasers,
     row.solo_touch_5k_revenue,
+    row.last_touch_immediate_vip_5k_purchasers,
   ]);
 
   return {
