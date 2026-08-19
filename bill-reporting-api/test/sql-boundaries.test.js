@@ -6,6 +6,29 @@ async function readQuery(fileName) {
   return readFile(new URL(`../sql/${fileName}`, import.meta.url), "utf8");
 }
 
+const reportQueries = [
+  "query_report_window.sql",
+  "query_live_acquisition.sql",
+  "query_5k_performance.sql",
+  "query_meta_delivery_daily.sql",
+];
+
+test("every freshness boundary comes from hourly Meta delivery", async () => {
+  const queries = await Promise.all(reportQueries.map(readQuery));
+
+  for (const query of queries) {
+    const boundary = query.match(
+      /(?:report_window|hourly_bounds) AS \([\s\S]*?FROM `([^`]+)`[\s\S]*?WHERE source = 'meta'\s*\)/,
+    );
+
+    assert.ok(boundary, "Expected a Meta delivery freshness boundary");
+    assert.equal(
+      boundary[1],
+      "able-folio-499722.booming_data_analytics.mart_ad_performance_hourly",
+    );
+  }
+});
+
 test("report cutoff follows the latest completed Meta hour", async () => {
   const query = await readQuery("query_report_window.sql");
 

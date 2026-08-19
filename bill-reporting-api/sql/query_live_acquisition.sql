@@ -5,7 +5,7 @@ WITH report_window AS (
       TIMESTAMP_ADD(MAX(hour_start), INTERVAL 1 HOUR),
       TIMESTAMP_TRUNC(CURRENT_TIMESTAMP(), HOUR, 'America/Los_Angeles')
     ) AS data_through
-  FROM `able-folio-499722.booming_data_analytics.mart_conversions_ad_performance_hourly`
+  FROM `able-folio-499722.booming_data_analytics.mart_ad_performance_hourly`
   WHERE source = 'meta'
 ),
 
