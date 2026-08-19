@@ -24,3 +24,5 @@ select
   source.payload.content_name as payload_content_name,
   source.payload.content_type as payload_content_type
 from ${ref("segretl_form_submitted")} source
+-- Google Ads Data Manager imports only the most recent 14 days from BigQuery.
+where source.conversion_ts >= timestamp_sub(current_timestamp(), interval 14 day)
