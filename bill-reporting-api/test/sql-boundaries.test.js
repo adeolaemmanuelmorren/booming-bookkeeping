@@ -36,3 +36,15 @@ test("daily delivery excludes the unfinished Pacific date", async () => {
   );
   assert.doesNotMatch(query, /BETWEEN/);
 });
+
+test("$5K revenue includes every collected mentorship payment for each buyer", async () => {
+  const query = await readQuery("query_5k_performance.sql");
+
+  assert.match(query, /payments\.payment_category = 'mentorship'/);
+  assert.match(
+    query,
+    /payments\.payment_time >= acquisition\.registration_timestamp/,
+  );
+  assert.match(query, /SUM\(payments\.net_amount\) AS collected_revenue/);
+  assert.doesNotMatch(query, /first_5k_revenue/);
+});
