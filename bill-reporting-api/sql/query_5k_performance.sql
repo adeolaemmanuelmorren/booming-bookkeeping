@@ -1,3 +1,5 @@
+-- Semantic metrics are built in Dataform model mart_meta_krc_reporting_hourly.
+-- Keep this API query limited to the completed-hour boundary and output shape.
 WITH report_window AS (
   SELECT
     MIN(hour_start) AS available_start,
@@ -7,107 +9,32 @@ WITH report_window AS (
     ) AS data_through
   FROM `able-folio-499722.booming_data_analytics.mart_ad_performance_hourly`
   WHERE source = 'meta'
-),
-
-attribution_rows AS (
-  SELECT
-    'first' AS attribution_method,
-    first_touch_click_hour AS hour_start,
-    first_touch_campaign_id AS campaign_id,
-    first_touch_adset_id AS adset_id,
-    first_touch_ad_id AS ad_id,
-    registration_id,
-    is_immediate_vip,
-    is_5k_purchaser
-  FROM `able-folio-499722.booming_data_analytics.mart_krc_acquisition`
-  WHERE first_touch_click_hour IS NOT NULL
-
-  UNION ALL
-
-  SELECT
-    'last' AS attribution_method,
-    last_touch_click_hour AS hour_start,
-    last_touch_campaign_id AS campaign_id,
-    last_touch_adset_id AS adset_id,
-    last_touch_ad_id AS ad_id,
-    registration_id,
-    is_immediate_vip,
-    is_5k_purchaser
-  FROM `able-folio-499722.booming_data_analytics.mart_krc_acquisition`
-  WHERE last_touch_click_hour IS NOT NULL
-
-  UNION ALL
-
-  SELECT
-    'solo' AS attribution_method,
-    first_touch_click_hour AS hour_start,
-    first_touch_campaign_id AS campaign_id,
-    first_touch_adset_id AS adset_id,
-    first_touch_ad_id AS ad_id,
-    registration_id,
-    is_immediate_vip,
-    is_5k_purchaser
-  FROM `able-folio-499722.booming_data_analytics.mart_krc_acquisition`
-  WHERE is_solo_touch
-    AND first_touch_click_hour IS NOT NULL
 )
 
 SELECT
   FORMAT_DATETIME(
     '%Y-%m-%dT%H:%M',
-    DATETIME(attribution.hour_start, 'America/Los_Angeles')
+    DATETIME(reporting.hour_start, 'America/Los_Angeles')
   ) AS hour_start_pacific,
-  attribution.campaign_id,
-  attribution.adset_id,
-  attribution.ad_id,
-  COUNT(DISTINCT IF(
-    attribution_method = 'last' AND is_5k_purchaser,
-    registration_id,
-    NULL
-  )) AS last_touch_5k_purchasers,
-  COUNT(DISTINCT IF(
-    attribution_method = 'last' AND is_5k_purchaser,
-    registration_id,
-    NULL
-  )) * 4997 AS last_touch_5k_revenue,
-  COUNT(DISTINCT IF(
-    attribution_method = 'last'
-      AND is_immediate_vip
-      AND is_5k_purchaser,
-    registration_id,
-    NULL
-  )) AS last_touch_immediate_vip_5k_purchasers,
-  COUNT(DISTINCT IF(
-    attribution_method = 'first' AND is_5k_purchaser,
-    registration_id,
-    NULL
-  )) AS first_touch_5k_purchasers,
-  COUNT(DISTINCT IF(
-    attribution_method = 'first' AND is_5k_purchaser,
-    registration_id,
-    NULL
-  )) * 4997 AS first_touch_5k_revenue,
-  COUNT(DISTINCT IF(
-    attribution_method = 'solo' AND is_5k_purchaser,
-    registration_id,
-    NULL
-  )) AS solo_touch_5k_purchasers,
-  COUNT(DISTINCT IF(
-    attribution_method = 'solo' AND is_5k_purchaser,
-    registration_id,
-    NULL
-  )) * 4997 AS solo_touch_5k_revenue
-FROM attribution_rows attribution
+  reporting.campaign_id,
+  reporting.adset_id,
+  reporting.ad_id,
+  reporting.last_touch_5k_purchasers,
+  reporting.last_touch_5k_revenue,
+  reporting.last_touch_immediate_vip_5k_purchasers,
+  reporting.first_touch_5k_purchasers,
+  reporting.first_touch_5k_revenue,
+  reporting.solo_touch_5k_purchasers,
+  reporting.solo_touch_5k_revenue
+FROM `able-folio-499722.booming_data_analytics.mart_meta_krc_reporting_hourly`
+  AS reporting
 CROSS JOIN report_window
-WHERE attribution.hour_start >= report_window.available_start
-  AND attribution.hour_start < report_window.data_through
-GROUP BY
-  attribution.hour_start,
-  attribution.campaign_id,
-  attribution.adset_id,
-  attribution.ad_id
-HAVING
-  last_touch_5k_purchasers > 0
-  OR first_touch_5k_purchasers > 0
-  OR solo_touch_5k_purchasers > 0
+WHERE reporting.source = 'meta'
+  AND reporting.hour_start >= report_window.available_start
+  AND reporting.hour_start < report_window.data_through
+  AND (
+    reporting.last_touch_5k_purchasers > 0
+    OR reporting.first_touch_5k_purchasers > 0
+    OR reporting.solo_touch_5k_purchasers > 0
+  )
 ORDER BY hour_start_pacific, campaign_id, adset_id, ad_id;

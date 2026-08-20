@@ -60,20 +60,26 @@ test("daily delivery excludes the unfinished Pacific date", async () => {
   assert.doesNotMatch(query, /BETWEEN/);
 });
 
-test("BBB revenue values every attributed buyer at $4,997", async () => {
-  const query = await readQuery("query_5k_performance.sql");
+test("hourly report queries read the shared Dataform reporting mart", async () => {
+  const queries = await Promise.all([
+    readQuery("query_live_acquisition.sql"),
+    readQuery("query_5k_performance.sql"),
+  ]);
 
-  assert.match(query, /\* 4997 AS last_touch_5k_revenue/);
-  assert.match(query, /\* 4997 AS first_touch_5k_revenue/);
-  assert.match(query, /\* 4997 AS solo_touch_5k_revenue/);
-  assert.doesNotMatch(query, /payments\.net_amount/);
+  for (const query of queries) {
+    assert.match(query, /mart_meta_krc_reporting_hourly/);
+    assert.doesNotMatch(query, /mart_krc_acquisition/);
+    assert.doesNotMatch(query, /COUNT\(DISTINCT/);
+    assert.doesNotMatch(query, /FULL OUTER JOIN/);
+    assert.doesNotMatch(query, /UNION ALL/);
+  }
 });
 
-test("VIP to $5K counts only buyers who were also immediate VIPs", async () => {
+test("BBB semantic calculations stay in Dataform", async () => {
   const query = await readQuery("query_5k_performance.sql");
 
-  assert.match(
-    query,
-    /AND is_immediate_vip\s+AND is_5k_purchaser[\s\S]*AS last_touch_immediate_vip_5k_purchasers/,
-  );
+  assert.match(query, /reporting\.last_touch_5k_revenue/);
+  assert.match(query, /reporting\.last_touch_immediate_vip_5k_purchasers/);
+  assert.doesNotMatch(query, /\* 4997/);
+  assert.doesNotMatch(query, /is_immediate_vip/);
 });
