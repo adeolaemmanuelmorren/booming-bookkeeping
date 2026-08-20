@@ -9,28 +9,6 @@ WITH report_window AS (
   WHERE source = 'meta'
 ),
 
-collected_5k_revenue AS (
-  SELECT
-    acquisition.registration_id,
-    SUM(payments.net_amount) AS collected_revenue
-  FROM `able-folio-499722.booming_data_analytics.mart_krc_acquisition` acquisition
-  JOIN `able-folio-499722.booming_data_analytics.mart_payments` payments
-    ON payments.profile_id = acquisition.profile_id
-   AND payments.payment_time >= acquisition.registration_timestamp
-  WHERE acquisition.is_5k_purchaser
-    AND payments.payment_category = 'mentorship'
-  GROUP BY acquisition.registration_id
-),
-
-acquisition_with_revenue AS (
-  SELECT
-    acquisition.*,
-    COALESCE(revenue.collected_revenue, 0) AS collected_5k_revenue
-  FROM `able-folio-499722.booming_data_analytics.mart_krc_acquisition` acquisition
-  LEFT JOIN collected_5k_revenue revenue
-    USING (registration_id)
-),
-
 attribution_rows AS (
   SELECT
     'first' AS attribution_method,
@@ -40,9 +18,8 @@ attribution_rows AS (
     first_touch_ad_id AS ad_id,
     registration_id,
     is_immediate_vip,
-    is_5k_purchaser,
-    collected_5k_revenue
-  FROM acquisition_with_revenue
+    is_5k_purchaser
+  FROM `able-folio-499722.booming_data_analytics.mart_krc_acquisition`
   WHERE first_touch_click_hour IS NOT NULL
 
   UNION ALL
@@ -55,9 +32,8 @@ attribution_rows AS (
     last_touch_ad_id AS ad_id,
     registration_id,
     is_immediate_vip,
-    is_5k_purchaser,
-    collected_5k_revenue
-  FROM acquisition_with_revenue
+    is_5k_purchaser
+  FROM `able-folio-499722.booming_data_analytics.mart_krc_acquisition`
   WHERE last_touch_click_hour IS NOT NULL
 
   UNION ALL
@@ -70,9 +46,8 @@ attribution_rows AS (
     first_touch_ad_id AS ad_id,
     registration_id,
     is_immediate_vip,
-    is_5k_purchaser,
-    collected_5k_revenue
-  FROM acquisition_with_revenue
+    is_5k_purchaser
+  FROM `able-folio-499722.booming_data_analytics.mart_krc_acquisition`
   WHERE is_solo_touch
     AND first_touch_click_hour IS NOT NULL
 )
@@ -90,11 +65,11 @@ SELECT
     registration_id,
     NULL
   )) AS last_touch_5k_purchasers,
-  SUM(IF(
+  COUNT(DISTINCT IF(
     attribution_method = 'last' AND is_5k_purchaser,
-    collected_5k_revenue,
-    0
-  )) AS last_touch_5k_revenue,
+    registration_id,
+    NULL
+  )) * 4997 AS last_touch_5k_revenue,
   COUNT(DISTINCT IF(
     attribution_method = 'last'
       AND is_immediate_vip
@@ -107,21 +82,21 @@ SELECT
     registration_id,
     NULL
   )) AS first_touch_5k_purchasers,
-  SUM(IF(
+  COUNT(DISTINCT IF(
     attribution_method = 'first' AND is_5k_purchaser,
-    collected_5k_revenue,
-    0
-  )) AS first_touch_5k_revenue,
+    registration_id,
+    NULL
+  )) * 4997 AS first_touch_5k_revenue,
   COUNT(DISTINCT IF(
     attribution_method = 'solo' AND is_5k_purchaser,
     registration_id,
     NULL
   )) AS solo_touch_5k_purchasers,
-  SUM(IF(
+  COUNT(DISTINCT IF(
     attribution_method = 'solo' AND is_5k_purchaser,
-    collected_5k_revenue,
-    0
-  )) AS solo_touch_5k_revenue
+    registration_id,
+    NULL
+  )) * 4997 AS solo_touch_5k_revenue
 FROM attribution_rows attribution
 CROSS JOIN report_window
 WHERE attribution.hour_start >= report_window.available_start
