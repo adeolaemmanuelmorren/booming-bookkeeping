@@ -11,13 +11,12 @@ if (!expectedToken) {
   throw new Error("REPORT_API_SECRET is required.");
 }
 
-const { loadReportData, loadReportWindow } = await createBigQueryReportLoaders({
-  projectId,
-  location,
-});
+const { loadReportData, loadReportWindow, loadSelectedReportData } =
+  await createBigQueryReportLoaders({ projectId, location });
 const handleRequest = createRequestHandler({
   loadReportData,
   loadReportWindow,
+  loadSelectedReportData,
   expectedToken,
 });
 

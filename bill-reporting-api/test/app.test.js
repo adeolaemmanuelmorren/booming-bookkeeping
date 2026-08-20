@@ -123,10 +123,39 @@ test("returns only the selected page and range", async () => {
   });
 });
 
-test("concurrent report requests share one full BigQuery load", async () => {
-  let loadCount = 0;
+test("loads a selected range directly from BigQuery", async () => {
+  let fullLoadCount = 0;
+  let selectedLoadCount = 0;
   const handleRequest = handler({
     loadReportData: async () => {
+      fullLoadCount += 1;
+      return reportData();
+    },
+    loadSelectedReportData: async (selection, reportWindow) => {
+      selectedLoadCount += 1;
+      return {
+        ...reportData(),
+        reportWindow,
+        selectedRange: {
+          start: selection.start,
+          end: selection.end,
+        },
+      };
+    },
+  });
+  const path =
+    "/v1/report-data?mode=live&start=2026-08-17T00%3A00&end=2026-08-19T00%3A00";
+
+  await handleRequest(request(path, "secret"));
+
+  assert.equal(selectedLoadCount, 1);
+  assert.equal(fullLoadCount, 0);
+});
+
+test("concurrent report requests share one selected BigQuery load", async () => {
+  let loadCount = 0;
+  const handleRequest = handler({
+    loadSelectedReportData: async () => {
       loadCount += 1;
       return reportData();
     },
@@ -147,7 +176,7 @@ test("report and range caches expire at the next hour", async () => {
   let loadCount = 0;
   const handleRequest = handler({
     now: () => nowMs,
-    loadReportData: async () => {
+    loadSelectedReportData: async () => {
       loadCount += 1;
       return reportData();
     },

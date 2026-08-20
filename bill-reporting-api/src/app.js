@@ -45,6 +45,7 @@ function etagFor(value) {
 export function createRequestHandler({
   loadReportData,
   loadReportWindow,
+  loadSelectedReportData,
   expectedToken,
   now = () => Date.now(),
 }) {
@@ -55,6 +56,7 @@ export function createRequestHandler({
   let windowExpiresAt = 0;
   let pendingWindowLoad = null;
   const responseCache = new Map();
+  const pendingSelectedLoads = new Map();
 
   function nextHourMs(nowMs) {
     return (Math.floor(nowMs / 3_600_000) + 1) * 3_600_000;
@@ -88,6 +90,7 @@ export function createRequestHandler({
       .then((reportWindow) => {
         cachedWindow = reportWindow;
         windowExpiresAt = nextHourMs(now());
+        responseCache.clear();
         return reportWindow;
       })
       .finally(() => {
@@ -125,24 +128,63 @@ export function createRequestHandler({
     const selection = parseReportSelection(url);
 
     if (hasSelectionParameters && !selection) {
-      return json({ error: "A valid report mode and date range are required." }, 400);
+      return json(
+        { error: "A valid report mode and date range are required." },
+        400,
+      );
     }
 
-    const reportData = await getReportData();
-    const dataThrough =
-      reportData.reportWindow[0]?.data_through_pacific ?? "unknown";
-    const cacheKey = selection
-      ? [selection.mode, selection.start, selection.end, dataThrough].join(":")
-      : `full:${dataThrough}`;
+    if (!selection) {
+      const reportData = await getReportData();
+      const dataThrough =
+        reportData.reportWindow[0]?.data_through_pacific ?? "unknown";
+      const cacheKey = `full:${dataThrough}`;
+      let cachedResponse = responseCache.get(cacheKey);
+
+      if (!cachedResponse) {
+        cachedResponse = {
+          body: JSON.stringify(reportData),
+          etag: etagFor(cacheKey),
+        };
+        responseCache.set(cacheKey, cachedResponse);
+      }
+
+      return conditionalResponse(
+        request,
+        cachedResponse.body,
+        cachedResponse.etag,
+      );
+    }
+
+    const reportWindow = await getReportWindow();
+    const dataThrough = reportWindow[0]?.data_through_pacific ?? "unknown";
+    const cacheKey = [
+      selection.mode,
+      selection.start,
+      selection.end,
+      dataThrough,
+    ].join(":");
     let cachedResponse = responseCache.get(cacheKey);
 
     if (!cachedResponse) {
+      let pendingLoad = pendingSelectedLoads.get(cacheKey);
+
+      if (!pendingLoad) {
+        pendingLoad = (
+          loadSelectedReportData
+            ? loadSelectedReportData(selection, reportWindow)
+            : getReportData().then((reportData) =>
+                selectCompactReportData(reportData, selection),
+              )
+        ).finally(() => {
+          pendingSelectedLoads.delete(cacheKey);
+        });
+        pendingSelectedLoads.set(cacheKey, pendingLoad);
+      }
+
+      const selectedReport = await pendingLoad;
       cachedResponse = {
-        body: JSON.stringify(
-          selection
-            ? selectCompactReportData(reportData, selection)
-            : reportData,
-        ),
+        body: JSON.stringify(selectedReport),
         etag: etagFor(cacheKey),
       };
       responseCache.set(cacheKey, cachedResponse);

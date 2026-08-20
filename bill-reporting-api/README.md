@@ -13,7 +13,14 @@ in this service rather than copying it into the frontend repository.
 ## Endpoints
 
 - `GET /healthz` — unauthenticated health check
-- `GET /v1/report-data` — live report data; requires `X-Report-Api-Key`
+- `GET /v1/report-window` — available dates and latest completed Meta hour
+- `GET /v1/report-data?mode=live&start=...&end=...` — IVIP report range
+- `GET /v1/report-data?mode=five-k&start=...&end=...` — BBB report range
+
+Selected report ranges are applied inside BigQuery. The API does not download
+the complete hourly history before returning a page.
+
+Report endpoints require `X-Report-Api-Key`.
 
 ## Required environment
 

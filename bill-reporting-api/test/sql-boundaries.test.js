@@ -47,6 +47,8 @@ test("hourly reports stop at the completed-hour boundary", async () => {
   for (const query of queries) {
     assert.match(query, /hour_start < report_window\.data_through/);
     assert.match(query, /TIMESTAMP_ADD\(MAX\(hour_start\), INTERVAL 1 HOUR\)/);
+    assert.match(query, /PARSE_DATETIME\([^)]+@range_start_pacific\)/);
+    assert.match(query, /PARSE_DATETIME\([^)]+@range_end_pacific\)/);
   }
 });
 
@@ -57,6 +59,8 @@ test("daily delivery excludes the unfinished Pacific date", async () => {
     query,
     /delivery\.date < DATE\(report_window\.data_through, 'America\/Los_Angeles'\)/,
   );
+  assert.match(query, /delivery\.date >= DATE\([\s\S]*?@range_start_pacific/);
+  assert.match(query, /delivery\.date < DATE\([\s\S]*?@range_end_pacific/);
   assert.doesNotMatch(query, /BETWEEN/);
 });
 

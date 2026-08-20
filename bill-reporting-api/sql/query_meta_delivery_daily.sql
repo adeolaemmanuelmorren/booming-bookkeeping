@@ -21,5 +21,11 @@ SELECT
 FROM `able-folio-499722.booming_data_analytics.mart_meta_delivery_daily` delivery
 CROSS JOIN report_window
 WHERE delivery.date >= DATE(report_window.available_start, 'America/Los_Angeles')
+  AND delivery.date >= DATE(
+    PARSE_DATETIME('%Y-%m-%dT%H:%M', @range_start_pacific)
+  )
+  AND delivery.date < DATE(
+    PARSE_DATETIME('%Y-%m-%dT%H:%M', @range_end_pacific)
+  )
   AND delivery.date < DATE(report_window.data_through, 'America/Los_Angeles')
 ORDER BY delivery.date, delivery.level, campaign_id, adset_id, ad_id;

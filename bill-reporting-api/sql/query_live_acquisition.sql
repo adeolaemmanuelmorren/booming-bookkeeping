@@ -36,5 +36,13 @@ FROM `able-folio-499722.booming_data_analytics.mart_meta_krc_reporting_hourly`
 CROSS JOIN report_window
 WHERE reporting.source = 'meta'
   AND reporting.hour_start >= report_window.available_start
+  AND reporting.hour_start >= TIMESTAMP(
+    PARSE_DATETIME('%Y-%m-%dT%H:%M', @range_start_pacific),
+    'America/Los_Angeles'
+  )
+  AND reporting.hour_start < TIMESTAMP(
+    PARSE_DATETIME('%Y-%m-%dT%H:%M', @range_end_pacific),
+    'America/Los_Angeles'
+  )
   AND reporting.hour_start < report_window.data_through
 ORDER BY hour_start_pacific, campaign_name, adset_name, ad_name;

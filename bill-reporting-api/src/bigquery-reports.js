@@ -10,6 +10,11 @@ const QUERY_FILES = {
   metaDeliveryDaily: "query_meta_delivery_daily.sql",
 };
 
+const FULL_HISTORY_RANGE = {
+  range_start_pacific: "1970-01-01T00:00",
+  range_end_pacific: "2100-01-01T00:00",
+};
+
 async function readQueries() {
   const entries = await Promise.all(
     Object.entries(QUERY_FILES).map(async ([reportName, fileName]) => {
@@ -34,19 +39,64 @@ export async function createBigQueryReportLoaders({ projectId, location }) {
     return rows;
   }
 
-  async function loadReportData() {
-    const entries = await Promise.all(
-      Object.entries(queries).map(async ([reportName, query]) => {
-        const [rows] = await bigQuery.query({ query, location });
-        return [reportName, rows];
-      }),
-    );
+  async function runReportQuery(reportName, params) {
+    const [rows] = await bigQuery.query({
+      query: queries[reportName],
+      location,
+      params,
+    });
 
-    return compactReportData(Object.fromEntries(entries));
+    return rows;
+  }
+
+  async function loadReportData() {
+    const [reportWindow, liveAcquisition, fiveKPerformance, metaDeliveryDaily] =
+      await Promise.all([
+        loadReportWindow(),
+        runReportQuery("liveAcquisition", FULL_HISTORY_RANGE),
+        runReportQuery("fiveKPerformance", FULL_HISTORY_RANGE),
+        runReportQuery("metaDeliveryDaily", FULL_HISTORY_RANGE),
+      ]);
+
+    return compactReportData({
+      reportWindow,
+      liveAcquisition,
+      fiveKPerformance,
+      metaDeliveryDaily,
+    });
+  }
+
+  async function loadSelectedReportData(selection, reportWindow) {
+    const params = {
+      range_start_pacific: selection.start,
+      range_end_pacific: selection.end,
+    };
+    const livePromise = runReportQuery("liveAcquisition", params);
+    const dailyPromise = runReportQuery("metaDeliveryDaily", params);
+    const fiveKPromise =
+      selection.mode === "five-k"
+        ? runReportQuery("fiveKPerformance", params)
+        : Promise.resolve([]);
+    const [liveAcquisition, fiveKPerformance, metaDeliveryDaily] =
+      await Promise.all([livePromise, fiveKPromise, dailyPromise]);
+
+    return {
+      ...compactReportData({
+        reportWindow,
+        liveAcquisition,
+        fiveKPerformance,
+        metaDeliveryDaily,
+      }),
+      selectedRange: {
+        start: selection.start,
+        end: selection.end,
+      },
+    };
   }
 
   return {
     loadReportData,
     loadReportWindow,
+    loadSelectedReportData,
   };
 }
