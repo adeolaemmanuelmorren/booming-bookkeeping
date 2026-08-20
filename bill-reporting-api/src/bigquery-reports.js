@@ -21,11 +21,20 @@ async function readQueries() {
   return Object.fromEntries(entries);
 }
 
-export async function createBigQueryReportLoader({ projectId, location }) {
+export async function createBigQueryReportLoaders({ projectId, location }) {
   const bigQuery = new BigQuery({ projectId });
   const queries = await readQueries();
 
-  return async function loadReportData() {
+  async function loadReportWindow() {
+    const [rows] = await bigQuery.query({
+      query: queries.reportWindow,
+      location,
+    });
+
+    return rows;
+  }
+
+  async function loadReportData() {
     const entries = await Promise.all(
       Object.entries(queries).map(async ([reportName, query]) => {
         const [rows] = await bigQuery.query({ query, location });
@@ -34,5 +43,10 @@ export async function createBigQueryReportLoader({ projectId, location }) {
     );
 
     return compactReportData(Object.fromEntries(entries));
+  }
+
+  return {
+    loadReportData,
+    loadReportWindow,
   };
 }

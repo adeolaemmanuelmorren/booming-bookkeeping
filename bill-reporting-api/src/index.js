@@ -1,22 +1,24 @@
 import { createServer } from "node:http";
 import { createRequestHandler } from "./app.js";
-import { createBigQueryReportLoader } from "./bigquery-reports.js";
+import { createBigQueryReportLoaders } from "./bigquery-reports.js";
 
 const port = Number(process.env.PORT ?? 8080);
 const projectId = process.env.BIGQUERY_PROJECT_ID ?? "able-folio-499722";
 const location = process.env.BIGQUERY_LOCATION ?? "US";
 const expectedToken = process.env.REPORT_API_SECRET;
-const cacheSeconds = Number(process.env.REPORT_CACHE_SECONDS ?? 120);
 
 if (!expectedToken) {
   throw new Error("REPORT_API_SECRET is required.");
 }
 
-const loadReportData = await createBigQueryReportLoader({ projectId, location });
+const { loadReportData, loadReportWindow } = await createBigQueryReportLoaders({
+  projectId,
+  location,
+});
 const handleRequest = createRequestHandler({
   loadReportData,
+  loadReportWindow,
   expectedToken,
-  cacheSeconds,
 });
 
 const server = createServer(async (request, response) => {
