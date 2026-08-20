@@ -119,25 +119,30 @@ export function createRequestHandler({
   }
 
   async function serveSelectedReport(request, url) {
+    const hasSelectionParameters = ["mode", "start", "end"].some((name) =>
+      url.searchParams.has(name),
+    );
     const selection = parseReportSelection(url);
-    if (!selection) {
+
+    if (hasSelectionParameters && !selection) {
       return json({ error: "A valid report mode and date range are required." }, 400);
     }
 
     const reportData = await getReportData();
     const dataThrough =
       reportData.reportWindow[0]?.data_through_pacific ?? "unknown";
-    const cacheKey = [
-      selection.mode,
-      selection.start,
-      selection.end,
-      dataThrough,
-    ].join(":");
+    const cacheKey = selection
+      ? [selection.mode, selection.start, selection.end, dataThrough].join(":")
+      : `full:${dataThrough}`;
     let cachedResponse = responseCache.get(cacheKey);
 
     if (!cachedResponse) {
       cachedResponse = {
-        body: JSON.stringify(selectCompactReportData(reportData, selection)),
+        body: JSON.stringify(
+          selection
+            ? selectCompactReportData(reportData, selection)
+            : reportData,
+        ),
         etag: etagFor(cacheKey),
       };
       responseCache.set(cacheKey, cachedResponse);

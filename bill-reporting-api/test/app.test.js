@@ -64,7 +64,11 @@ test("requires a valid mode and Pacific date range", async () => {
   const handleRequest = handler();
 
   assert.equal(
-    (await handleRequest(request("/v1/report-data", "secret"))).status,
+    (
+      await handleRequest(
+        request("/v1/report-data?mode=live", "secret"),
+      )
+    ).status,
     400,
   );
   assert.equal(
@@ -78,6 +82,17 @@ test("requires a valid mode and Pacific date range", async () => {
     ).status,
     400,
   );
+});
+
+test("keeps the unfiltered response available during the site rollout", async () => {
+  const response = await handler()(
+    request("/v1/report-data", "secret"),
+  );
+  const body = JSON.parse(response.body);
+
+  assert.equal(response.status, 200);
+  assert.equal(body.liveRows.length, 2);
+  assert.equal(body.fiveKRows.length, 1);
 });
 
 test("returns only the selected page and range", async () => {
